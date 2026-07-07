@@ -383,6 +383,21 @@ function InvestDashboard() {
     return () => { clearInterval(pi); clearInterval(ni); };
   }, [loaded, apiKey, holdings.length]); // eslint-disable-line
 
+  useEffect(() => { // 저장된 이미지·밝기 로드
+    try {
+      const l = localStorage.getItem("coyg-logo"); if (l) setLogoData(l);
+      const b = localStorage.getItem("coyg-bg"); if (b) setBgData(b);
+      const d = localStorage.getItem("coyg-bgdim"); if (d) setBgDim(+d);
+    } catch (e) {}
+  }, []);
+  useEffect(() => { // 배경 적용 (#bg는 React 밖 엘리먼트)
+    const el = document.getElementById("bg");
+    if (el && bgData) el.style.backgroundImage = `url('${bgData}')`;
+    const ov = document.getElementById("bgov");
+    if (ov) ov.style.opacity = String(bgDim);
+    try { localStorage.setItem("coyg-bgdim", String(bgDim)); } catch (e) {}
+  }, [bgData, bgDim]);
+
   /* ── 환율 자동: 시작 시 + 30분마다 ── */
   useEffect(() => {
     if (!loaded) return;
@@ -1177,20 +1192,6 @@ function InvestDashboard() {
     if (kind === "logo") setLogoData(""); else setBgData("");
     showToast("제거됨 — repo의 파일이 있으면 그걸로 대체됩니다");
   };
-  useEffect(() => { // 저장된 이미지·밝기 로드
-    try {
-      const l = localStorage.getItem("coyg-logo"); if (l) setLogoData(l);
-      const b = localStorage.getItem("coyg-bg"); if (b) setBgData(b);
-      const d = localStorage.getItem("coyg-bgdim"); if (d) setBgDim(+d);
-    } catch (e) {}
-  }, []);
-  useEffect(() => { // 배경 적용 (#bg는 React 밖 엘리먼트)
-    const el = document.getElementById("bg");
-    if (el && bgData) el.style.backgroundImage = `url('${bgData}')`;
-    const ov = document.getElementById("bgov");
-    if (ov) ov.style.opacity = String(bgDim);
-    try { localStorage.setItem("coyg-bgdim", String(bgDim)); } catch (e) {}
-  }, [bgData, bgDim]);
 
   /* ── 개별종목 검색·추가 ── */
   const settingsSearch = async () => {
