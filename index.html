@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>COYG · 자산 대시보드</title>
+<meta name="theme-color" content="#EF0107">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="COYG">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="logo.png">
+<link rel="apple-touch-icon" href="logo.png">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#F7F7F9;-webkit-tap-highlight-color:transparent}
+  input,textarea{-webkit-appearance:none}
+  *{box-sizing:border-box}
+  #bg{position:fixed;inset:0;z-index:0;background:#F7F7F9 url('bg.jpg') center 18%/cover no-repeat}
+  #bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(247,247,249,.86) 0%,rgba(247,247,249,.93) 45%,rgba(247,247,249,.97) 100%)}
+  #root{position:relative;z-index:1}
+  .fadein{animation:fi .22s ease}
+  @keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion: reduce){.fadein{animation:none}}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ═══════════ 데이터 ═══════════ */
+const SECTORS = {
+  aero: { name: "우주항공", target: 0.30, color: "#EF0107" },
+  div: { name: "배당", target: 0.30, color: "#FF7A7E" },
+  bio: { name: "바이오", target: 0.15, color: "#C70008" },
+  infra: { name: "알파·인프라", target: 0.125, color: "#FFB3B5" },
+  tech: { name: "알파·빅테크", target: 0.125, color: "#8B0005" },
+  crypto: { name: "크립토", target: null, color: "#191F28" },
+};
+const DEFAULT_HOLDINGS = [
+  { id: "ITA", type: "stock", symbol: "ITA", name: "iShares 우주항공·방어", sector: "aero", w: 0.5, qty: 0, avg: 0 },
+  { id: "GE", type: "stock", symbol: "GE", name: "GE Aerospace", sector: "aero", w: 0.25, qty: 0, avg: 0 },
+  { id: "RTX", type: "stock", symbol: "RTX", name: "RTX", sector: "aero", w: 0.25, qty: 0, avg: 0 },
+  { id: "SCHD", type: "stock", symbol: "SCHD", name: "Schwab 배당주", sector: "div", w: 0.6, qty: 0, avg: 0 },
+  { id: "KO", type: "stock", symbol: "KO", name: "Coca-Cola", sector: "div", w: 0.2, qty: 0, avg: 0 },
+  { id: "TXN", type: "stock", symbol: "TXN", name: "Texas Instruments", sector: "div", w: 0.2, qty: 0, avg: 0 },
+  { id: "IBB", type: "stock", symbol: "IBB", name: "iShares 바이오테크", sector: "bio", w: 0.6, qty: 0, avg: 0 },
+  { id: "VRTX", type: "stock", symbol: "VRTX", name: "Vertex Pharm.", sector: "bio", w: 0.2, qty: 0, avg: 0 },
+  { id: "GILD", type: "stock", symbol: "GILD", name: "Gilead Sciences", sector: "bio", w: 0.2, qty: 0, avg: 0 },
+  { id: "PAVE", type: "stock", symbol: "PAVE", name: "Global X 인프라", sector: "infra", w: 0.5, qty: 0, avg: 0 },
+  { id: "ETN", type: "stock", symbol: "ETN", name: "Eaton", sector: "infra", w: 0.25, qty: 0, avg: 0 },
+  { id: "PWR", type: "stock", symbol: "PWR", name: "Quanta Services", sector: "infra", w: 0.25, qty: 0, avg: 0 },
+  { id: "QQQ", type: "stock", symbol: "QQQ", name: "Invesco 나스닥100", sector: "tech", w: 0.5, qty: 0, avg: 0 },
+  { id: "NVDA", type: "stock", symbol: "NVDA", name: "NVIDIA", sector: "tech", w: 0.3, qty: 0, avg: 0 },
+  { id: "MSFT", type: "stock", symbol: "MSFT", name: "Microsoft", sector: "tech", w: 0.2, qty: 0, avg: 0 },
+  { id: "BTC", type: "crypto", symbol: "BTC", cgId: "bitcoin", name: "비트코인", sector: "crypto", w: 0.7, qty: 0, avg: 0 },
+  { id: "ETH", type: "crypto", symbol: "ETH", cgId: "ethereum", name: "이더리움", sector: "crypto", w: 0.3, qty: 0, avg: 0 },
+];
+const DEFAULT_TASKS = [
+  "환전 (원화→달러, 분할)", "ETF 코어 매수 (ITA·SCHD·IBB·PAVE·QQQ)", "개별 위성 매수",
+  "크립토 집행 (현물70/선물30)", "비중 점검 (현황 탭 확인)", "저널 기록 (매수사유 1줄)",
+];
+const POOL = {
+  aero: [
+    { s: "ITA", n: "iShares 우주항공·방어 ETF", note: "섹터 코어 · 유동성 최상" },
+    { s: "XAR", n: "SPDR 우주항공 ETF", note: "동일가중 · 중소형 고베타" },
+    { s: "GE", n: "GE Aerospace", note: "ITA 최대 비중 · 항공엔진" },
+    { s: "RTX", n: "RTX", note: "미사일·방공" },
+    { s: "BA", n: "Boeing", note: "상업·군용 항공기" },
+    { s: "LMT", n: "Lockheed Martin", note: "F-35 · 배당 겸비" },
+    { s: "NOC", n: "Northrop Grumman", note: "B-21·우주" },
+    { s: "GD", n: "General Dynamics", note: "함정·지상장비" },
+    { s: "LHX", n: "L3Harris", note: "통신·전자전" },
+    { s: "AXON", n: "Axon Enterprise", note: "치안 기술 · 고성장" },
+  ],
+  div: [
+    { s: "SCHD", n: "Schwab 배당주 ETF", note: "섹터 코어 · 수익률 ~3.3%" },
+    { s: "VIG", n: "Vanguard 배당성장 ETF", note: "배당성장 + 기술 노출" },
+    { s: "DGRO", n: "iShares 배당성장 ETF", note: "보수 저렴" },
+    { s: "KO", n: "Coca-Cola", note: "배당 귀족" },
+    { s: "PEP", n: "PepsiCo", note: "배당 귀족" },
+    { s: "TXN", n: "Texas Instruments", note: "아날로그 반도체 배당" },
+    { s: "CVX", n: "Chevron", note: "에너지 고배당" },
+    { s: "VZ", n: "Verizon", note: "통신 고배당" },
+    { s: "BMY", n: "Bristol-Myers Squibb", note: "제약 배당" },
+    { s: "O", n: "Realty Income", note: "월배당 리츠" },
+  ],
+  bio: [
+    { s: "IBB", n: "iShares 바이오테크 ETF", note: "섹터 코어 · 대형 위주" },
+    { s: "XBI", n: "SPDR 바이오테크 ETF", note: "동일가중 · 고베타" },
+    { s: "GILD", n: "Gilead Sciences", note: "IBB 최대 비중" },
+    { s: "AMGN", n: "Amgen", note: "대장주 + 배당" },
+    { s: "VRTX", n: "Vertex Pharm.", note: "낭포성섬유증" },
+    { s: "REGN", n: "Regeneron", note: "항체 신약" },
+    { s: "ALNY", n: "Alnylam", note: "RNAi 치료제" },
+    { s: "BIIB", n: "Biogen", note: "신경계 질환" },
+  ],
+  infra: [
+    { s: "PAVE", n: "Global X 인프라 ETF", note: "섹터 코어 · AI 전력/그리드" },
+    { s: "PWR", n: "Quanta Services", note: "전력 인프라 시공" },
+    { s: "ETN", n: "Eaton", note: "데이터센터 전력관리" },
+    { s: "TT", n: "Trane Technologies", note: "데이터센터 쿨링" },
+    { s: "SRE", n: "Sempra", note: "유틸리티·전력" },
+    { s: "UNP", n: "Union Pacific", note: "철도 물류" },
+    { s: "NUE", n: "Nucor", note: "철강" },
+    { s: "VRT", n: "Vertiv", note: "데이터센터 인프라" },
+  ],
+  tech: [
+    { s: "QQQ", n: "Invesco 나스닥100 ETF", note: "섹터 코어 · 메가캡 분산" },
+    { s: "SMH", n: "VanEck 반도체 ETF", note: "반도체 집중 · 고베타" },
+    { s: "NVDA", n: "NVIDIA", note: "AI 반도체 대장" },
+    { s: "MSFT", n: "Microsoft", note: "클라우드·AI" },
+    { s: "AAPL", n: "Apple", note: "하드웨어·서비스" },
+    { s: "GOOGL", n: "Alphabet", note: "검색·클라우드" },
+    { s: "AMZN", n: "Amazon", note: "이커머스·AWS" },
+    { s: "META", n: "Meta Platforms", note: "SNS·AI" },
+    { s: "AVGO", n: "Broadcom", note: "AI 맞춤형 반도체" },
+    { s: "TSM", n: "TSMC (ADR)", note: "파운드리" },
+  ],
+};
+const STORE_KEY = "invest-dash-v1";
+const storageGet = (k) => { try { const v = localStorage.getItem(k); return v ? { value: v } : null; } catch (e) { return null; } };
+const storageSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+
+/* ═══════════ 유틸 ═══════════ */
+const fmtKRW = (n) => (n == null || isNaN(n) ? "—" : "₩" + Math.round(n).toLocaleString("ko-KR"));
+const fmtKRWc = (n) => { // 축약형
+  if (n == null || isNaN(n)) return "—";
+  const a = Math.abs(n);
+  if (a >= 1e8) return (n / 1e8).toFixed(2) + "억";
+  if (a >= 1e4) return Math.round(n / 1e4).toLocaleString() + "만";
+  return Math.round(n).toLocaleString();
+};
+const fmtUSD = (n) => (n == null || isNaN(n) ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: n >= 1000 ? 0 : 2 }));
+const fmtBig = (n) => {
+  if (n == null || isNaN(n)) return "—";
+  if (n >= 1e12) return "$" + (n / 1e12).toFixed(2) + "T";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+  return "$" + (n / 1e6).toFixed(0) + "M";
+};
+const fmtPct = (n, sign = true) => (n == null || isNaN(n) ? "—" : (sign && n > 0 ? "+" : "") + (n * 100).toFixed(1) + "%");
+const timeAgo = (ts) => {
+  const s = Math.floor(Date.now() / 1000 - ts);
+  if (s < 3600) return Math.floor(s / 60) + "분 전";
+  if (s < 86400) return Math.floor(s / 3600) + "시간 전";
+  return Math.floor(s / 86400) + "일 전";
+};
+const upDown = (v) => (v > 0 ? "#F04452" : v < 0 ? "#3182F6" : "#8B95A1");
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+/* ═══════════ SVG 차트 ═══════════ */
+const Spark = ({ data, w = 64, h = 22, color }) => {
+  if (!data || data.length < 2) return null;
+  const min = Math.min(...data), max = Math.max(...data);
+  const rng = max - min || 1;
+  const pts = data.map((v, i) => `${(i / (data.length - 1)) * w},${h - 2 - ((v - min) / rng) * (h - 4)}`).join(" ");
+  const c = color || (data[data.length - 1] >= data[0] ? "#F04452" : "#3182F6");
+  return (
+    <svg width={w} height={h} style={{ display: "block" }}>
+      <polyline points={pts} fill="none" stroke={c} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+    </svg>
+  );
+};
+const AreaChart = ({ data, w = 320, h = 90 }) => {
+  if (!data || data.length < 2) return null;
+  const vals = data.map((d) => d.v);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const rng = max - min || 1;
+  const px = (i) => (i / (data.length - 1)) * w;
+  const py = (v) => h - 6 - ((v - min) / rng) * (h - 16);
+  const line = vals.map((v, i) => `${px(i)},${py(v)}`).join(" ");
+  const up = vals[vals.length - 1] >= vals[0];
+  const c = up ? "#EF0107" : "#3182F6";
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block" }}>
+      <defs>
+        <linearGradient id="ag" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={c} stopOpacity="0.18" />
+          <stop offset="100%" stopColor={c} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${h} ${line} ${w},${h}`} fill="url(#ag)" />
+      <polyline points={line} fill="none" stroke={c} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={px(vals.length - 1)} cy={py(vals[vals.length - 1])} r="3" fill={c} />
+    </svg>
+  );
+};
+const Donut = ({ segments, size = 116, stroke = 15 }) => {
+  const r = (size - stroke) / 2, C = 2 * Math.PI * r;
+  let off = 0;
+  const tot = segments.reduce((a, s) => a + s.v, 0) || 1;
+  return (
+    <svg width={size} height={size}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#F1F3F6" strokeWidth={stroke} />
+      {segments.filter((s) => s.v > 0).map((s, i) => {
+        const frac = s.v / tot, dash = frac * C;
+        const el = (
+          <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color} strokeWidth={stroke}
+            strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-off}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`} strokeLinecap="butt" />
+        );
+        off += dash;
+        return el;
+      })}
+    </svg>
+  );
+};
+
+/* ═══════════ 메인 ═══════════ */
+function InvestDashboard() {
+  const [tab, setTab] = useState("home");
+  const [holdings, setHoldings] = useState(DEFAULT_HOLDINGS);
+  const [apiKey, setApiKey] = useState("");
+  const [fx, setFx] = useState(1350);
+  const [monthly, setMonthly] = useState(7000000);
+  const [stockRatio, setStockRatio] = useState(0.6);
+  const [tasks, setTasks] = useState(DEFAULT_TASKS.map((t) => ({ t, done: false })));
+  const [taskMonth, setTaskMonth] = useState("");
+  const [history, setHistory] = useState([]);
+  const [prices, setPrices] = useState({});
+  const [poolPrices, setPoolPrices] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
+  const [news, setNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsFilter, setNewsFilter] = useState("mix");
+  const [newsLines, setNewsLines] = useState({});
+  const [openSec, setOpenSec] = useState(null);
+  const [secLoading, setSecLoading] = useState("");
+  const [coins, setCoins] = useState([]);
+  const [coinsLoading, setCoinsLoading] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [searchRes, setSearchRes] = useState([]);
+  const [searchSec, setSearchSec] = useState("tech");
+  const [searching, setSearching] = useState(false);
+  const [fxLoading, setFxLoading] = useState(false);
+  const [backup, setBackup] = useState("");
+  const [err, setErr] = useState("");
+  const [toast, setToast] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const saveTimer = useRef(null);
+  const toastTimer = useRef(null);
+
+  const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 2200); };
+
+  /* ── 저장/로드 ── */
+  useEffect(() => {
+    try {
+      const r = storageGet(STORE_KEY);
+      if (r?.value) {
+        const d = JSON.parse(r.value);
+        if (d.holdings) setHoldings(d.holdings);
+        if (d.apiKey) setApiKey(d.apiKey);
+        if (d.fx) setFx(d.fx);
+        if (d.monthly) setMonthly(d.monthly);
+        if (d.stockRatio) setStockRatio(d.stockRatio);
+        if (d.tasks) setTasks(d.tasks);
+        if (d.taskMonth) setTaskMonth(d.taskMonth);
+        if (d.history) setHistory(d.history);
+      }
+    } catch (e) {}
+    setLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!loaded) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      storageSet(STORE_KEY, JSON.stringify({ holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history }));
+    }, 500);
+  }, [holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history, loaded]);
+
+  /* ── 시세 ── */
+  const refreshPrices = useCallback(async () => {
+    setLoading(true); setErr("");
+    const next = { ...prices };
+    try {
+      const cg = holdings.filter((h) => h.type === "crypto");
+      if (cg.length) {
+        const ids = [...new Set(cg.map((h) => h.cgId))].join(",");
+        const r = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`);
+        if (r.ok) {
+          const d = await r.json();
+          cg.forEach((h) => { const p = d[h.cgId]; if (p) next[h.symbol] = { price: p.usd, chgPct: (p.usd_24h_change || 0) / 100 }; });
+        }
+      }
+      const st = holdings.filter((h) => h.type === "stock");
+      if (st.length && apiKey) {
+        const results = await Promise.allSettled(
+          st.map((h) => fetch(`https://finnhub.io/api/v1/quote?symbol=${h.symbol}&token=${apiKey}`).then((r) => (r.ok ? r.json() : Promise.reject())))
+        );
+        results.forEach((res, i) => {
+          if (res.status === "fulfilled" && res.value.c > 0) {
+            const q = res.value;
+            next[st[i].symbol] = { price: q.c, chgPct: q.pc ? (q.c - q.pc) / q.pc : 0 };
+          }
+        });
+        if (results.every((r) => r.status === "rejected")) setErr("주식 시세 실패 — API 키를 확인하세요");
+      } else if (st.length && !apiKey) {
+        setErr("주식 시세는 설정 탭에서 Finnhub API 키 등록 후 표시됩니다 (코인은 연동됨)");
+      }
+      setPrices(next); setLastUpdate(new Date());
+    } catch (e) { setErr("시세 조회 오류 — 네트워크를 확인하세요"); }
+    setLoading(false);
+  }, [holdings, apiKey, prices]);
+  useEffect(() => { if (loaded) refreshPrices(); }, [loaded]); // eslint-disable-line
+
+  /* ── 종목별 헤드라인 ── */
+  const loadNewsLines = useCallback(async () => {
+    if (!apiKey) return;
+    const to = todayStr();
+    const from = new Date(Date.now() - 3 * 86400e3).toISOString().slice(0, 10);
+    const st = holdings.filter((h) => h.type === "stock");
+    try {
+      const results = await Promise.allSettled(
+        st.map((h) => fetch(`https://finnhub.io/api/v1/company-news?symbol=${h.symbol}&from=${from}&to=${to}&token=${apiKey}`).then((r) => (r.ok ? r.json() : [])))
+      );
+      const next = {};
+      results.forEach((res, i) => {
+        if (res.status === "fulfilled" && res.value?.[0]?.headline) {
+          const n = res.value[0];
+          next[st[i].symbol] = { headline: n.headline, url: n.url };
+        }
+      });
+      setNewsLines(next);
+    } catch (e) {}
+  }, [apiKey, holdings]);
+
+  /* ── 자동 갱신 ── */
+  useEffect(() => {
+    if (!loaded || !apiKey) return;
+    loadNewsLines();
+    const pi = setInterval(() => refreshPrices(), 60000);
+    const ni = setInterval(() => loadNewsLines(), 300000);
+    return () => { clearInterval(pi); clearInterval(ni); };
+  }, [loaded, apiKey, holdings.length]); // eslint-disable-line
+
+  /* ── 탐색 ── */
+  const loadSectorQuotes = useCallback(async (sec) => {
+    if (!apiKey) { setErr("후보 시세는 API 키가 필요합니다 (설정 탭)"); return; }
+    setSecLoading(sec);
+    const syms = POOL[sec].map((p) => p.s).filter((s) => !poolPrices[s]);
+    try {
+      const results = await Promise.allSettled(
+        syms.map((s) => fetch(`https://finnhub.io/api/v1/quote?symbol=${s}&token=${apiKey}`).then((r) => (r.ok ? r.json() : Promise.reject())))
+      );
+      const next = { ...poolPrices };
+      results.forEach((res, i) => {
+        if (res.status === "fulfilled" && res.value.c > 0) {
+          const q = res.value;
+          next[syms[i]] = { price: q.c, chgPct: q.pc ? (q.c - q.pc) / q.pc : 0 };
+        }
+      });
+      setPoolPrices(next);
+    } catch (e) {}
+    setSecLoading("");
+  }, [apiKey, poolPrices]);
+
+  const loadCoins = useCallback(async () => {
+    setCoinsLoading(true);
+    try {
+      const r = await fetch("https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=20&page=1&sparkline=true&price_change_percentage=24h");
+      if (r.ok) setCoins(await r.json());
+      else setErr("코인 마켓 조회 실패 (잠시 후 재시도)");
+    } catch (e) { setErr("코인 마켓 조회 실패"); }
+    setCoinsLoading(false);
+  }, []);
+
+  const runSearch = useCallback(async () => {
+    if (!apiKey) { setErr("종목 검색은 API 키가 필요합니다 (설정 탭)"); return; }
+    if (!searchQ.trim()) return;
+    setSearching(true);
+    try {
+      const r = await fetch(`https://finnhub.io/api/v1/search?q=${encodeURIComponent(searchQ.trim())}&token=${apiKey}`);
+      if (r.ok) {
+        const d = await r.json();
+        setSearchRes((d.result || []).filter((x) => !x.symbol.includes(".") && !x.symbol.includes(":")).slice(0, 6));
+      }
+    } catch (e) { setErr("검색 실패"); }
+    setSearching(false);
+  }, [apiKey, searchQ]);
+
+  const loadFx = useCallback(async () => {
+    setFxLoading(true);
+    try {
+      const r = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (r.ok) {
+        const d = await r.json();
+        if (d?.rates?.KRW) { setFx(Math.round(d.rates.KRW * 10) / 10); showToast(`환율 갱신: ${Math.round(d.rates.KRW * 10) / 10}원`); }
+      } else setErr("환율 조회 실패 — 수동 입력하세요");
+    } catch (e) { setErr("환율 조회 실패 — 수동 입력하세요"); }
+    setFxLoading(false);
+  }, []);
+
+  /* ── 뉴스 ── */
+  const loadNews = useCallback(async (filter) => {
+    const f = filter || newsFilter;
+    if (!apiKey) { setErr("뉴스는 API 키가 필요합니다 (설정 탭)"); return; }
+    setNewsLoading(true); setErr("");
+    try {
+      const to = todayStr();
+      const from = new Date(Date.now() - 7 * 86400e3).toISOString().slice(0, 10);
+      let reqs = [];
+      if (f === "market") {
+        reqs = [fetch(`https://finnhub.io/api/v1/news?category=general&token=${apiKey}`).then((r) => (r.ok ? r.json() : [])).then((a) => a.slice(0, 25).map((n) => ({ ...n, sym: "시장" }))).catch(() => [])];
+      } else if (f === "mix") {
+        const valued = holdings.filter((h) => h.type === "stock").map((h) => ({ ...h, v: (prices[h.symbol]?.price || 0) * h.qty })).sort((a, b) => b.v - a.v).slice(0, 5);
+        const targets = valued.some((v) => v.v > 0) ? valued : holdings.filter((h) => h.type === "stock").slice(0, 5);
+        reqs = targets.map((h) =>
+          fetch(`https://finnhub.io/api/v1/company-news?symbol=${h.symbol}&from=${from}&to=${to}&token=${apiKey}`)
+            .then((r) => (r.ok ? r.json() : [])).then((a) => a.slice(0, 6).map((n) => ({ ...n, sym: h.symbol }))).catch(() => [])
+        );
+        reqs.push(fetch(`https://finnhub.io/api/v1/news?category=general&token=${apiKey}`).then((r) => (r.ok ? r.json() : [])).then((a) => a.slice(0, 8).map((n) => ({ ...n, sym: "시장" }))).catch(() => []));
+      } else {
+        reqs = [fetch(`https://finnhub.io/api/v1/company-news?symbol=${f}&from=${from}&to=${to}&token=${apiKey}`).then((r) => (r.ok ? r.json() : [])).then((a) => a.slice(0, 25).map((n) => ({ ...n, sym: f }))).catch(() => [])];
+      }
+      const all = (await Promise.all(reqs)).flat();
+      const seen = new Set();
+      setNews(all.filter((n) => n.headline && !seen.has(n.headline) && seen.add(n.headline)).sort((a, b) => b.datetime - a.datetime).slice(0, 30));
+    } catch (e) { setErr("뉴스 조회 실패"); }
+    setNewsLoading(false);
+  }, [apiKey, holdings, prices, newsFilter]);
+
+  const goNews = (sym) => { setNewsFilter(sym); setTab("news"); loadNews(sym); };
+  const addHolding = (sec, s, n) => {
+    if (holdings.some((h) => h.symbol === s)) { showToast(`${s}는 이미 목록에 있어요`); return; }
+    setHoldings((hs) => [...hs, { id: s, type: "stock", symbol: s, name: n, sector: sec, w: 0, qty: 0, avg: 0 }]);
+    showToast(`${s} 추가됨 — 설정에서 수량 입력`);
+  };
+
+  /* ── 계산 ── */
+  const calc = useMemo(() => {
+    let totV = 0, totC = 0, stockV = 0, cryptoV = 0, dayChg = 0;
+    const rows = holdings.map((h) => {
+      const q = prices[h.symbol];
+      const p = q?.price || 0;
+      const v = p * h.qty * fx;
+      const c = h.avg * h.qty * fx;
+      totV += v; totC += c;
+      if (q?.chgPct != null && v > 0) dayChg += v - v / (1 + q.chgPct);
+      if (h.type === "crypto") cryptoV += v; else stockV += v;
+      return { ...h, price: p, chgPct: q?.chgPct, value: v, cost: c, pl: v - c, plPct: c > 0 ? (v - c) / c : null };
+    });
+    const secAgg = {};
+    Object.keys(SECTORS).forEach((k) => (secAgg[k] = 0));
+    rows.forEach((r) => (secAgg[r.sector] += r.value));
+    const bandAlerts = Object.entries(SECTORS).filter(([k, s]) => k !== "crypto" && stockV > 0 && Math.abs(secAgg[k] / stockV - s.target) > 0.05).map(([k]) => SECTORS[k].name);
+    return { rows, totV, totC, pl: totV - totC, plPct: totC > 0 ? (totV - totC) / totC : null, stockV, cryptoV, secAgg, dayChg, dayChgPct: totV - dayChg > 0 ? dayChg / (totV - dayChg) : null, bandAlerts };
+  }, [holdings, prices, fx]);
+
+  /* ── 자산 스냅샷 (일 1회) ── */
+  useEffect(() => {
+    if (!loaded || calc.totV <= 0) return;
+    const d = todayStr();
+    setHistory((h) => {
+      const last = h[h.length - 1];
+      if (last?.d === d) {
+        if (Math.abs(last.v - calc.totV) < 1) return h;
+        return [...h.slice(0, -1), { d, v: calc.totV }];
+      }
+      return [...h, { d, v: calc.totV }].slice(-400);
+    });
+  }, [calc.totV, loaded]); // eslint-disable-line
+
+  const curMonth = new Date().toISOString().slice(0, 7);
+  useEffect(() => {
+    if (loaded && taskMonth && taskMonth !== curMonth) {
+      setTasks(DEFAULT_TASKS.map((t) => ({ t, done: false }))); setTaskMonth(curMonth);
+    } else if (loaded && !taskMonth) setTaskMonth(curMonth);
+  }, [loaded, taskMonth, curMonth]);
+
+  const setH = (id, f, v) => setHoldings((hs) => hs.map((h) => (h.id === id ? { ...h, [f]: v } : h)));
+  const delH = (id) => setHoldings((hs) => hs.filter((h) => h.id !== id));
+
+  /* ═══════════ 스타일 ═══════════ */
+  const S = {
+    app: { fontFamily: "-apple-system,BlinkMacSystemFont,'Apple SD Gothic Neo','Pretendard','Noto Sans KR',sans-serif", color: "#191F28", minHeight: "100vh", maxWidth: 480, margin: "0 auto", paddingBottom: 84, fontSize: 14 },
+    header: { padding: "13px 16px 11px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, background: "linear-gradient(135deg,#C70008 0%,#EF0107 60%,#D50006 100%)", zIndex: 10, boxShadow: "0 2px 12px rgba(239,1,7,.25)" },
+    card: { background: "rgba(255,255,255,.94)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", borderRadius: 16, padding: 15, margin: "10px 12px", border: "1px solid #EEF0F4", boxShadow: "0 1px 5px rgba(25,31,40,.05)" },
+    label: { fontSize: 10, letterSpacing: 1.2, color: "#8B95A1", textTransform: "uppercase", fontWeight: 700 },
+    row: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F3F5F8" },
+    btn: { background: "#EF0107", color: "#FFF", border: "none", borderRadius: 11, padding: "9px 15px", fontWeight: 700, fontSize: 13, cursor: "pointer" },
+    ghost: { background: "#F5F6F8", color: "#4E5968", border: "1px solid #E8EBEF", borderRadius: 11, padding: "8px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer" },
+    chip: (on) => ({ background: on ? "#EF0107" : "#F5F6F8", color: on ? "#FFF" : "#6B7684", border: on ? "none" : "1px solid #E8EBEF", borderRadius: 20, padding: "6px 13px", fontSize: 12, fontWeight: on ? 700 : 500, cursor: "pointer", whiteSpace: "nowrap" }),
+    input: { background: "#F7F8FA", border: "1px solid #E8EBEF", borderRadius: 10, color: "#191F28", padding: "8px 10px", fontSize: 13, width: "100%", boxSizing: "border-box", fontVariantNumeric: "tabular-nums" },
+    tabbar: { position: "fixed", bottom: 0, left: 0, right: 0, maxWidth: 480, margin: "0 auto", display: "flex", background: "rgba(255,255,255,.97)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", borderTop: "1px solid #EEF0F4", zIndex: 20, paddingBottom: "env(safe-area-inset-bottom)" },
+    tabBtn: (on) => ({ flex: 1, padding: "9px 0 10px", textAlign: "center", fontSize: 10.5, fontWeight: on ? 700 : 500, color: on ? "#EF0107" : "#A6AEBB", background: "none", border: "none", cursor: "pointer", transition: "color .15s" }),
+    plus: { background: "#FFF", border: "1.5px solid #F5C2C2", color: "#EF0107", borderRadius: 9, width: 27, height: 27, fontSize: 15, fontWeight: 800, cursor: "pointer", flexShrink: 0 },
+  };
+  const Icon = ({ d }) => (
+    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", margin: "0 auto 3px" }}>
+      <path d={d} />
+    </svg>
+  );
+
+  if (!loaded) return <div style={{ ...S.app, display: "flex", alignItems: "center", justifyContent: "center", color: "#8B95A1" }}>불러오는 중…</div>;
+
+  /* ═══════════ 현황 ═══════════ */
+  const MiniStat = ({ label, v, tot, targetPct }) => (
+    <div style={{ flex: 1, background: "rgba(255,255,255,.18)", borderRadius: 11, padding: "9px 11px" }}>
+      <div style={{ fontSize: 10.5, color: "rgba(255,255,255,.85)" }}>{label} <span style={{ opacity: 0.75 }}>목표 {Math.round(targetPct * 100)}%</span></div>
+      <div style={{ fontWeight: 700, fontSize: 14.5, fontVariantNumeric: "tabular-nums", color: "#FFF" }}>{fmtKRW(v)}</div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,.8)" }}>{tot > 0 ? fmtPct(v / tot, false) : "—"}</div>
+    </div>
+  );
+
+  const Home = () => {
+    const donutSegs = Object.entries(SECTORS).map(([k, s]) => ({ label: s.name, v: calc.secAgg[k], color: s.color }));
+    return (
+      <div className="fadein">
+        {/* 히어로 */}
+        <div style={{ ...S.card, background: "linear-gradient(135deg,#EF0107 0%,#C70008 100%)", border: "none", color: "#FFF", boxShadow: "0 6px 20px rgba(239,1,7,.3)" }}>
+          <div style={{ ...S.label, color: "rgba(255,255,255,.85)" }}>총 평가액</div>
+          <div style={{ fontSize: 30, fontWeight: 800, fontVariantNumeric: "tabular-nums", letterSpacing: -0.6, marginTop: 2 }}>{fmtKRW(calc.totV)}</div>
+          <div style={{ display: "flex", gap: 12, marginTop: 5, fontSize: 13, flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700 }}>
+              {calc.totC > 0 ? `${calc.pl >= 0 ? "▲" : "▼"} ${fmtKRW(Math.abs(calc.pl))} (${fmtPct(calc.plPct)})` : "설정 탭에서 수량·평단을 입력하세요"}
+            </span>
+            {calc.dayChgPct != null && (
+              <span style={{ background: "rgba(255,255,255,.2)", borderRadius: 7, padding: "1px 8px", fontSize: 12, fontWeight: 700 }}>
+                오늘 {calc.dayChg >= 0 ? "+" : ""}{fmtKRWc(calc.dayChg)} ({fmtPct(calc.dayChgPct)})
+              </span>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 13 }}>
+            <MiniStat label="주식" v={calc.stockV} tot={calc.totV} targetPct={stockRatio} />
+            <MiniStat label="크립토" v={calc.cryptoV} tot={calc.totV} targetPct={1 - stockRatio} />
+          </div>
+          <div style={{ marginTop: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: "rgba(255,255,255,.75)" }}>
+              {lastUpdate ? `${lastUpdate.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 업데이트 · $1=${fx.toLocaleString()}원 · 60초 자동` : "시세 미조회"}
+            </span>
+            <button style={{ ...S.ghost, background: "rgba(255,255,255,.22)", color: "#FFF", border: "none" }} onClick={refreshPrices} disabled={loading}>{loading ? "…" : "↻"}</button>
+          </div>
+        </div>
+
+        {/* 밴드 알림 */}
+        {calc.bandAlerts.length > 0 && (
+          <div style={{ margin: "0 12px", padding: "10px 13px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 12, fontSize: 12.5, color: "#C2410C" }}>
+            ⚠ <b>{calc.bandAlerts.join(", ")}</b> 비중이 목표 ±5%p를 벗어났어요 — 이번 달 적립으로 조정을 권장합니다
+          </div>
+        )}
+
+        {/* 자산 추이 */}
+        {history.length >= 2 && (
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={S.label}>자산 추이</div>
+              <span style={{ fontSize: 11, color: "#98A1AD" }}>{history[0].d} ~ ({history.length}일)</span>
+            </div>
+            <div style={{ marginTop: 8 }}><AreaChart data={history} /></div>
+          </div>
+        )}
+
+        {/* 배분 도넛 */}
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 8 }}>자산 배분</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <Donut segments={donutSegs} />
+            <div style={{ flex: 1 }}>
+              {donutSegs.map((s) => (
+                <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", fontSize: 12 }}>
+                  <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: s.color, marginRight: 7 }} />{s.label}</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: "#6B7684", fontWeight: 600 }}>{calc.totV > 0 ? fmtPct(s.v / calc.totV, false) : "—"}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 섹터 목표 vs 실제 */}
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 10 }}>주식 섹터 — 목표 vs 실제</div>
+          {Object.entries(SECTORS).filter(([k]) => k !== "crypto").map(([k, s]) => {
+            const actual = calc.stockV > 0 ? calc.secAgg[k] / calc.stockV : 0;
+            const band = Math.abs(actual - s.target) > 0.05;
+            return (
+              <div key={k} style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 }}>
+                  <span style={{ fontWeight: 600 }}>{s.name}</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums", color: band ? "#D97706" : "#8B95A1" }}>
+                    {fmtPct(actual, false)} / {fmtPct(s.target, false)} {band && "⚠"}
+                  </span>
+                </div>
+                <div style={{ height: 7, background: "#F1F3F6", borderRadius: 4, position: "relative" }}>
+                  <div style={{ width: `${Math.min(actual * 100, 100)}%`, height: "100%", background: band ? "#F59E0B" : "#EF0107", borderRadius: 4, transition: "width .4s" }} />
+                  <div style={{ position: "absolute", left: `${s.target * 100}%`, top: -2, width: 2, height: 11, background: "#191F28", opacity: 0.35 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 보유 종목 */}
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 4 }}>보유 종목</div>
+          {calc.rows.map((r) => (
+            <div key={r.id} style={{ ...S.row, cursor: "pointer" }} onClick={() => r.type === "stock" && goNews(r.symbol)}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>
+                  {r.symbol} <span style={{ fontWeight: 400, color: "#8B95A1", fontSize: 11.5 }}>{r.name}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8B95A1", fontVariantNumeric: "tabular-nums" }}>
+                  {r.qty > 0 ? `${r.qty}주 · 평단 ${fmtUSD(r.avg)}` : "미보유"} {r.price > 0 && `· ${fmtUSD(r.price)}`}
+                  {r.chgPct != null && <span style={{ color: upDown(r.chgPct), marginLeft: 4, fontWeight: 700 }}>{fmtPct(r.chgPct)}</span>}
+                </div>
+                {newsLines[r.symbol] && (
+                  <div onClick={(e) => { e.stopPropagation(); window.open(newsLines[r.symbol].url, "_blank"); }}
+                    style={{ fontSize: 10.5, color: "#C70008", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 240 }}>
+                    📰 {newsLines[r.symbol].headline}
+                  </div>
+                )}
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
+                <div style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", fontSize: 14 }}>{r.value > 0 ? fmtKRW(r.value) : "—"}</div>
+                {r.plPct != null && <div style={{ fontSize: 11.5, color: upDown(r.pl), fontVariantNumeric: "tabular-nums", fontWeight: 700 }}>{fmtPct(r.plPct)}</div>}
+              </div>
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>종목 탭=뉴스 · 📰 탭=원문 · 시세 60초/헤드라인 5분 자동 갱신</div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ═══════════ 탐색 ═══════════ */
+  const Explore = () => (
+    <div className="fadein">
+      {/* 종목 검색 */}
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>종목 검색 (미국 전체)</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={{ ...S.input, flex: 1 }} value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
+            placeholder="티커·기업명 (예: TSLA, palantir)" onKeyDown={(e) => e.key === "Enter" && runSearch()} />
+          <button style={S.btn} onClick={runSearch} disabled={searching}>{searching ? "…" : "검색"}</button>
+        </div>
+        {searchRes.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6 }}>
+              {Object.entries(SECTORS).filter(([k]) => k !== "crypto").map(([k, s]) => (
+                <button key={k} style={S.chip(searchSec === k)} onClick={() => setSearchSec(k)}>{s.name}</button>
+              ))}
+            </div>
+            {searchRes.map((x) => (
+              <div key={x.symbol} style={{ ...S.row, gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13 }}>{x.symbol}</span>
+                  <span style={{ color: "#8B95A1", fontSize: 11, marginLeft: 6 }}>{x.description}</span>
+                </div>
+                <button style={S.plus} onClick={() => addHolding(searchSec, x.symbol, x.description || x.symbol)}>+</button>
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 4 }}>섹터 칩을 고른 뒤 [+]를 누르면 해당 섹터로 추가됩니다</div>
+          </div>
+        )}
+      </div>
+
+      {/* 내 종목 시세 */}
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={S.label}>내 종목 시세</div>
+          <button style={S.ghost} onClick={refreshPrices} disabled={loading}>{loading ? "…" : "↻"}</button>
+        </div>
+        {calc.rows.map((r) => (
+          <div key={r.id} style={{ ...S.row, cursor: "pointer" }} onClick={() => r.type === "stock" && goNews(r.symbol)}>
+            <div>
+              <span style={{ fontWeight: 700 }}>{r.symbol}</span>
+              <span style={{ color: "#8B95A1", fontSize: 11.5, marginLeft: 6 }}>{SECTORS[r.sector].name}</span>
+            </div>
+            <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontWeight: 700 }}>{r.price > 0 ? fmtUSD(r.price) : "—"}</span>
+              <span style={{ color: upDown(r.chgPct || 0), marginLeft: 8, fontSize: 12.5, fontWeight: 700, display: "inline-block", minWidth: 52 }}>
+                {r.chgPct != null ? fmtPct(r.chgPct) : ""}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 섹터별 후보 풀 */}
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>섹터별 후보 종목 풀</div>
+        {Object.entries(POOL).map(([sec, list]) => (
+          <div key={sec} style={{ marginBottom: 7 }}>
+            <div onClick={() => { const nx = openSec === sec ? null : sec; setOpenSec(nx); if (nx) loadSectorQuotes(sec); }}
+              style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "11px 13px", background: "#F8F9FB", borderRadius: 11, cursor: "pointer", border: "1px solid #EEF0F4" }}>
+              <span style={{ fontWeight: 700, fontSize: 13.5 }}>
+                <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2.5, background: SECTORS[sec].color, marginRight: 8 }} />
+                {SECTORS[sec].name} <span style={{ color: "#98A1AD", fontWeight: 400, fontSize: 11.5 }}>({list.length})</span>
+              </span>
+              <span style={{ color: "#EF0107", fontSize: 12 }}>{openSec === sec ? "▲" : "▼"}</span>
+            </div>
+            {openSec === sec && (
+              <div style={{ padding: "2px 4px 0" }} className="fadein">
+                {secLoading === sec && <div style={{ fontSize: 12, color: "#98A1AD", padding: 8 }}>시세 불러오는 중…</div>}
+                {list.map((p) => {
+                  const q = poolPrices[p.s];
+                  const owned = holdings.some((h) => h.symbol === p.s);
+                  return (
+                    <div key={p.s} style={{ ...S.row, gap: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0, cursor: "pointer" }} onClick={() => goNews(p.s)}>
+                        <div style={{ fontWeight: 700, fontSize: 13 }}>
+                          {p.s} <span style={{ fontWeight: 400, color: "#8B95A1", fontSize: 11 }}>{p.n}</span>
+                        </div>
+                        <div style={{ fontSize: 10.5, color: "#98A1AD" }}>{p.note}</div>
+                      </div>
+                      <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                        <div style={{ fontWeight: 700, fontSize: 12.5 }}>{q ? fmtUSD(q.price) : "—"}</div>
+                        {q && <div style={{ fontSize: 11, color: upDown(q.chgPct), fontWeight: 700 }}>{fmtPct(q.chgPct)}</div>}
+                      </div>
+                      <button style={{ ...S.plus, opacity: owned ? 0.35 : 1 }} disabled={owned} onClick={() => addHolding(sec, p.s, p.n)}>{owned ? "✓" : "+"}</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 4 }}>정보 제공용 풀입니다(매수 추천 아님) · 판단과 책임은 본인에게 있습니다</div>
+      </div>
+
+      {/* 코인 TOP 20 */}
+      <div style={S.card}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={S.label}>코인 마켓 TOP 20 <span style={{ textTransform: "none", letterSpacing: 0, color: "#A6AEBB" }}>· 7일 추이</span></div>
+          <button style={S.ghost} onClick={loadCoins} disabled={coinsLoading}>{coinsLoading ? "…" : coins.length ? "↻" : "불러오기"}</button>
+        </div>
+        {coins.length === 0 && !coinsLoading && <div style={{ fontSize: 12.5, color: "#98A1AD", padding: "6px 0" }}>버튼을 눌러 시가총액 상위 코인을 불러오세요 (키 불필요)</div>}
+        {coins.map((c, i) => (
+          <div key={c.id} style={S.row}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0 }}>
+              <span style={{ color: "#A6AEBB", fontSize: 11, width: 17, fontVariantNumeric: "tabular-nums" }}>{i + 1}</span>
+              <img src={c.image} alt="" width="21" height="21" style={{ borderRadius: 11 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{c.symbol.toUpperCase()}</div>
+                <div style={{ color: "#98A1AD", fontSize: 10.5 }}>{fmtBig(c.market_cap)}</div>
+              </div>
+            </div>
+            <div style={{ margin: "0 8px" }}>
+              <Spark data={c.sparkline_in_7d?.price?.filter((_, j) => j % 6 === 0)} />
+            </div>
+            <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 12.5 }}>{fmtUSD(c.current_price)}</div>
+              <div style={{ color: upDown((c.price_change_percentage_24h || 0) / 100), fontSize: 11.5, fontWeight: 700 }}>
+                {fmtPct((c.price_change_percentage_24h || 0) / 100)}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  /* ═══════════ 뉴스 ═══════════ */
+  const chipSyms = [...new Set(holdings.filter((h) => h.type === "stock").map((h) => h.symbol))];
+  const News = () => (
+    <div className="fadein">
+      <div style={{ ...S.card, paddingBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={S.label}>뉴스 피드</div>
+          <button style={S.btn} onClick={() => loadNews()} disabled={newsLoading}>{newsLoading ? "로딩…" : "불러오기"}</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, overflowX: "auto", marginTop: 10, paddingBottom: 4, WebkitOverflowScrolling: "touch" }}>
+          <button style={S.chip(newsFilter === "mix")} onClick={() => { setNewsFilter("mix"); loadNews("mix"); }}>보유+시장</button>
+          <button style={S.chip(newsFilter === "market")} onClick={() => { setNewsFilter("market"); loadNews("market"); }}>시장 전반</button>
+          {chipSyms.map((s) => (
+            <button key={s} style={S.chip(newsFilter === s)} onClick={() => { setNewsFilter(s); loadNews(s); }}>{s}</button>
+          ))}
+        </div>
+      </div>
+      {news.length === 0 && !newsLoading && (
+        <div style={{ ...S.card, color: "#98A1AD", fontSize: 13 }}>필터를 고르고 불러오기를 누르세요. {!apiKey && "(설정 탭에서 API 키 필요)"}</div>
+      )}
+      {news.map((n, i) => (
+        <a key={i} href={n.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit" }}>
+          <div style={{ ...S.card, margin: "8px 12px", padding: "12px 13px", display: "flex", gap: 11 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 10, fontWeight: 700, background: n.sym === "시장" ? "#EEF1F5" : "#FDECEC", color: n.sym === "시장" ? "#6B7684" : "#C70008", borderRadius: 5, padding: "2px 7px" }}>{n.sym}</span>
+                <span style={{ fontSize: 10.5, color: "#A6AEBB" }}>{n.source} · {timeAgo(n.datetime)}</span>
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.45, fontWeight: 600 }}>{n.headline}</div>
+            </div>
+            {n.image && <img src={n.image} alt="" style={{ width: 62, height: 62, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+          </div>
+        </a>
+      ))}
+    </div>
+  );
+
+  /* ═══════════ 적립 ═══════════ */
+  const Plan = () => {
+    const stockAmt = monthly * stockRatio;
+    const cryptoAmt = monthly * (1 - stockRatio);
+    const doneCnt = tasks.filter((t) => t.done).length;
+    return (
+      <div className="fadein">
+        <div style={S.card}>
+          <div style={S.label}>이번 달 적립 ({curMonth})</div>
+          <div style={{ display: "flex", gap: 10, marginTop: 9 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 11, color: "#8B95A1", marginBottom: 3 }}>월 투입금액</div>
+              <input style={S.input} type="number" value={monthly} onChange={(e) => setMonthly(+e.target.value || 0)} />
+            </div>
+            <div style={{ width: 92 }}>
+              <div style={{ fontSize: 11, color: "#8B95A1", marginBottom: 3 }}>주식 비중 %</div>
+              <input style={S.input} type="number" step="5" value={Math.round(stockRatio * 100)} onChange={(e) => setStockRatio(Math.min(100, Math.max(0, +e.target.value)) / 100)} />
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10, fontSize: 13 }}>
+            <div style={{ flex: 1, background: "#F8F9FB", borderRadius: 11, padding: "9px 11px" }}>주식 <b style={{ float: "right" }}>{fmtKRW(stockAmt)}</b></div>
+            <div style={{ flex: 1, background: "#F8F9FB", borderRadius: 11, padding: "9px 11px" }}>크립토 <b style={{ float: "right" }}>{fmtKRW(cryptoAmt)}</b></div>
+          </div>
+        </div>
+
+        <div style={S.card}>
+          <div style={{ ...S.label, marginBottom: 4 }}>종목별 매수 금액</div>
+          {holdings.filter((h) => h.type === "stock" && h.w > 0).map((h) => {
+            const amt = stockAmt * SECTORS[h.sector].target * h.w;
+            const p = prices[h.symbol]?.price;
+            return (
+              <div key={h.id} style={S.row}>
+                <div>
+                  <span style={{ fontWeight: 700 }}>{h.symbol}</span>
+                  <span style={{ color: "#8B95A1", fontSize: 11, marginLeft: 6 }}>{SECTORS[h.sector].name} {Math.round(h.w * 100)}%</span>
+                </div>
+                <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  <div style={{ fontWeight: 700 }}>{fmtKRW(amt)}</div>
+                  {p > 0 && <div style={{ fontSize: 11, color: "#98A1AD" }}>≈ {(amt / fx / p).toFixed(2)}주</div>}
+                </div>
+              </div>
+            );
+          })}
+          <div style={S.row}>
+            <span style={{ fontWeight: 700 }}>크립토 (직접운용)</span>
+            <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtKRW(cryptoAmt)}</span>
+          </div>
+          <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>탐색에서 추가한 종목은 설정 탭에서 섹터 내 비중을 주면 반영됩니다</div>
+        </div>
+
+        <div style={S.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
+            <div style={S.label}>집행 체크리스트</div>
+            <span style={{ fontSize: 11.5, color: "#8B95A1", fontWeight: 600 }}>{doneCnt}/{tasks.length}</span>
+          </div>
+          <div style={{ height: 5, background: "#F1F3F6", borderRadius: 3, marginBottom: 11 }}>
+            <div style={{ width: `${(doneCnt / tasks.length) * 100}%`, height: "100%", background: "#EF0107", borderRadius: 3, transition: "width .3s" }} />
+          </div>
+          {tasks.map((tk, i) => (
+            <div key={i} onClick={() => setTasks((ts) => ts.map((x, j) => (j === i ? { ...x, done: !x.done } : x)))}
+              style={{ display: "flex", alignItems: "center", gap: 11, padding: "9.5px 0", borderBottom: "1px solid #F3F5F8", cursor: "pointer" }}>
+              <div style={{ width: 21, height: 21, borderRadius: 7, border: `2px solid ${tk.done ? "#EF0107" : "#D5DAE0"}`, background: tk.done ? "#EF0107" : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, color: "#FFF", fontWeight: 900, flexShrink: 0, transition: "all .15s" }}>
+                {tk.done ? "✓" : ""}
+              </div>
+              <span style={{ fontSize: 13.5, color: tk.done ? "#A6AEBB" : "#191F28", textDecoration: tk.done ? "line-through" : "none" }}>{i + 1}. {tk.t}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>매월 1일 자동 초기화</div>
+        </div>
+      </div>
+    );
+  };
+
+  /* ═══════════ 설정 ═══════════ */
+  const doBackup = () => {
+    const r = storageGet(STORE_KEY);
+    setBackup(r?.value || "");
+    showToast("아래 텍스트를 복사해 보관하세요");
+  };
+  const doRestore = () => {
+    try {
+      const d = JSON.parse(backup);
+      if (!d.holdings) throw 0;
+      storageSet(STORE_KEY, backup);
+      window.location.reload();
+    } catch (e) { setErr("복원 실패 — 올바른 백업 텍스트인지 확인하세요"); }
+  };
+  const doReset = () => {
+    if (window.confirm("모든 데이터(수량·평단·기록)를 초기화할까요? 되돌릴 수 없습니다.")) {
+      try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+      window.location.reload();
+    }
+  };
+  const Settings = () => (
+    <div className="fadein">
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>API · 환율</div>
+        <div style={{ fontSize: 11, color: "#8B95A1", marginBottom: 3 }}>Finnhub API 키 (finnhub.io 무료 가입 → API Key 복사)</div>
+        <input style={S.input} value={apiKey} onChange={(e) => setApiKey(e.target.value.trim())} placeholder="예: c1a2b3..." />
+        <div style={{ fontSize: 11, color: "#8B95A1", margin: "11px 0 3px" }}>USD/KRW 환율</div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={{ ...S.input, flex: 1 }} type="number" value={fx} onChange={(e) => setFx(+e.target.value || 0)} />
+          <button style={S.ghost} onClick={loadFx} disabled={fxLoading}>{fxLoading ? "…" : "자동 조회"}</button>
+        </div>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>보유 종목 관리 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>(수량 · 평단$ · 섹터 내 비중%)</span></div>
+        {holdings.map((h) => (
+          <div key={h.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "6.5px 0", borderBottom: "1px solid #F3F5F8" }}>
+            <div style={{ width: 58, fontWeight: 700, fontSize: 12 }}>{h.symbol}<div style={{ fontWeight: 400, fontSize: 9, color: "#A6AEBB" }}>{SECTORS[h.sector].name}</div></div>
+            <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.qty || ""} placeholder="수량" onChange={(e) => setH(h.id, "qty", +e.target.value || 0)} />
+            <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.avg || ""} placeholder="평단$" onChange={(e) => setH(h.id, "avg", +e.target.value || 0)} />
+            <input style={{ ...S.input, width: 52 }} type="number" step="5" value={Math.round(h.w * 100) || ""} placeholder="비중" onChange={(e) => setH(h.id, "w", (+e.target.value || 0) / 100)} />
+            <button style={{ ...S.plus, borderColor: "#E8EBEF", color: "#F04452" }} onClick={() => delH(h.id)}>×</button>
+          </div>
+        ))}
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>비중=섹터 내 %(합 100 권장) · 코인 수량은 개수 · 이 기기에 저장</div>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>데이터 백업 · 복원</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+          <button style={S.ghost} onClick={doBackup}>백업 텍스트 생성</button>
+          <button style={S.ghost} onClick={doRestore}>붙여넣은 텍스트로 복원</button>
+          <button style={{ ...S.ghost, color: "#F04452" }} onClick={doReset}>초기화</button>
+        </div>
+        <textarea style={{ ...S.input, height: 74, fontSize: 10.5, fontFamily: "monospace" }} value={backup} onChange={(e) => setBackup(e.target.value)}
+          placeholder="백업: 버튼을 누르면 여기 생성 → 복사해 메모장 보관&#10;복원: 백업 텍스트를 붙여넣고 복원 버튼" />
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 6 }}>기기를 바꾸거나 브라우저 데이터를 지울 때를 대비해 가끔 백업해 두세요</div>
+      </div>
+
+      <div style={{ margin: "14px 16px 22px", fontSize: 10.5, color: "#A6AEBB", lineHeight: 1.65 }}>
+        시세: Finnhub(주식, 15분 내 지연 가능)·CoinGecko(코인)·open.er-api(환율) 무료 API 기준으로 정확성이 보장되지 않습니다. 본 앱과 후보 종목 풀은 정보 제공 목적이며 투자자문·매수 추천이 아닙니다. 투자 판단과 책임은 본인에게 있습니다.
+      </div>
+    </div>
+  );
+
+  const TABS = [
+    { id: "home", label: "현황", icon: "M3 12l9-9 9 9M5 10v10h14V10", view: <Home /> },
+    { id: "explore", label: "탐색", icon: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35", view: <Explore /> },
+    { id: "news", label: "뉴스", icon: "M4 5h16v14H4zM8 9h8M8 13h8M8 17h5", view: <News /> },
+    { id: "plan", label: "적립", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", view: <Plan /> },
+    { id: "set", label: "설정", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 11-14 0 7 7 0 0114 0z", view: <Settings /> },
+  ];
+
+  return (
+    <div style={S.app}>
+      <div style={S.header}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <img src="logo.png" alt="" style={{ height: 34, width: 34, objectFit: "contain", filter: "drop-shadow(0 1px 3px rgba(0,0,0,.35))" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <div>
+            <div style={{ fontWeight: 900, fontSize: 19, letterSpacing: 1.5, color: "#FFF", fontStyle: "italic" }}>
+              COYG<span style={{ color: "rgba(255,255,255,.92)" }}>!</span>
+            </div>
+            <div style={{ fontSize: 9.5, color: "rgba(255,255,255,.85)", fontWeight: 600, letterSpacing: 0.5 }}>자산 코어·위성 — VICTORIA CONCORDIA CRESCIT</div>
+          </div>
+        </div>
+        <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,.75)" }}>총 평가</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: "#FFF" }}>{fmtKRWc(calc.totV)}</div>
+        </div>
+      </div>
+
+      {err && (
+        <div onClick={() => setErr("")} style={{ margin: "10px 12px 0", padding: "10px 13px", background: "#FDECEC", border: "1px solid #F5C2C2", borderRadius: 12, fontSize: 12, color: "#C70008", cursor: "pointer" }}>
+          {err} <span style={{ float: "right", opacity: 0.5 }}>✕</span>
+        </div>
+      )}
+
+      {TABS.find((t) => t.id === tab)?.view}
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 86, left: "50%", transform: "translateX(-50%)", background: "rgba(25,31,40,.92)", color: "#FFF", borderRadius: 22, padding: "9px 18px", fontSize: 12.5, fontWeight: 600, zIndex: 40, whiteSpace: "nowrap" }}>
+          {toast}
+        </div>
+      )}
+
+      <div style={S.tabbar}>
+        {TABS.map((t) => (
+          <button key={t.id} style={S.tabBtn(tab === t.id)} onClick={() => setTab(t.id)}>
+            <Icon d={t.icon} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<InvestDashboard />);
+</script>
+<script>
+  if ("serviceWorker" in navigator) { navigator.serviceWorker.register("sw.js").catch(function(){}); }
+</script>
+</body>
+</html>
