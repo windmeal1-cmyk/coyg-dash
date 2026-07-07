@@ -292,6 +292,7 @@ function InvestDashboard() {
   const [toast, setToast] = useState("");
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef(null);
+  const krRouteRef = useRef({});
   const toastTimer = useRef(null);
 
   const showToast = (m) => { setToast(m); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 2200); };
@@ -353,26 +354,47 @@ function InvestDashboard() {
       } else if (st.length && !apiKey) {
         setErr("주식 시세는 설정 탭에서 Finnhub API 키 등록 후 표시됩니다 (코인은 연동됨)");
       }
-      // 국내(KRX) 종목: 코드 있으면 자동 시세 (Yahoo, .KS→.KQ 순 시도)
+      // 국내(KRX) 종목: Yahoo 시세 — 프록시 3중 폴백 + 캐시버스터 + 6초 타임아웃
       const kr = holdings.filter((h) => h.type === "manual" && h.code);
       if (kr.length) {
+        const PROXIES = [
+          (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+          (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+          (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+        ];
+        const fetchTO = (url, ms) => {
+          const ctl = new AbortController();
+          const t = setTimeout(() => ctl.abort(), ms);
+          return fetch(url, { signal: ctl.signal }).finally(() => clearTimeout(t));
+        };
         const fetchKr = async (code) => {
-          for (const suf of [".KS", ".KQ"]) {
-            try {
-              const y = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suf}?range=1d&interval=1d`;
-              const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(y)}`);
-              if (!r.ok) continue;
-              const d = await r.json();
-              const meta = d?.chart?.result?.[0]?.meta;
-              if (meta?.regularMarketPrice) {
-                return { price: meta.regularMarketPrice, chgPct: meta.chartPreviousClose ? (meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose : null };
-              }
-            } catch (e) {}
+          const hint = krRouteRef.current[code] || {};
+          const sufs = hint.suf ? [hint.suf, hint.suf === ".KS" ? ".KQ" : ".KS"] : [".KS", ".KQ"];
+          const order = hint.px != null ? [hint.px, ...PROXIES.map((_, i) => i).filter((i) => i !== hint.px)] : PROXIES.map((_, i) => i);
+          for (const suf of sufs) {
+            const y = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suf}?range=1d&interval=1m&_=${Date.now()}`;
+            for (const pi of order) {
+              try {
+                const r = await fetchTO(PROXIES[pi](y), 6000);
+                if (!r.ok) continue;
+                const d = await r.json();
+                const meta = d?.chart?.result?.[0]?.meta;
+                if (meta?.regularMarketPrice > 0) {
+                  krRouteRef.current[code] = { suf, px: pi };
+                  return { price: meta.regularMarketPrice, chgPct: meta.chartPreviousClose ? (meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose : null };
+                }
+              } catch (e) {}
+            }
           }
           return null;
         };
         const rs = await Promise.allSettled(kr.map((h) => fetchKr(h.code)));
-        rs.forEach((r, i) => { if (r.status === "fulfilled" && r.value) next[kr[i].symbol] = { ...r.value, krw: true }; });
+        let krFail = 0;
+        rs.forEach((r, i) => {
+          if (r.status === "fulfilled" && r.value) next[kr[i].symbol] = { ...r.value, krw: true };
+          else krFail++;
+        });
+        if (krFail === kr.length && kr.length > 0 && !next[kr[0].symbol]) setErr("국내 시세 프록시 응답 없음 — 잠시 후 자동 재시도 (수동 현재가로 표시 중)");
       }
       setPrices(next); setLastUpdate(new Date());
     } catch (e) { setErr("시세 조회 오류 — 네트워크를 확인하세요"); }
