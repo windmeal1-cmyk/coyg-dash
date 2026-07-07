@@ -367,21 +367,55 @@ function InvestDashboard() {
           const t = setTimeout(() => ctl.abort(), ms);
           return fetch(url, { signal: ctl.signal }).finally(() => clearTimeout(t));
         };
+        const parseNum = (v) => (v == null ? null : parseFloat(String(v).replace(/,/g, "")));
         const fetchKr = async (code) => {
-          const hint = krRouteRef.current[code] || {};
-          const sufs = hint.suf ? [hint.suf, hint.suf === ".KS" ? ".KQ" : ".KS"] : [".KS", ".KQ"];
-          const order = hint.px != null ? [hint.px, ...PROXIES.map((_, i) => i).filter((i) => i !== hint.px)] : PROXIES.map((_, i) => i);
-          for (const suf of sufs) {
-            const y = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suf}?range=1d&interval=1m&_=${Date.now()}`;
+          const order = (() => {
+            const hint = krRouteRef.current[code];
+            const idx = PROXIES.map((_, i) => i);
+            return hint != null ? [hint, ...idx.filter((i) => i !== hint)] : idx;
+          })();
+          // 1순위: 네이버증권 basic (정확·실시간급, 종목명 포함)
+          for (const pi of order) {
+            try {
+              const u = `https://m.stock.naver.com/api/stock/${code}/basic`;
+              const r = await fetchTO(PROXIES[pi](u), 6000);
+              if (!r.ok) continue;
+              const d = await r.json();
+              const p = parseNum(d?.closePrice);
+              if (p > 0) {
+                krRouteRef.current[code] = pi;
+                const fr = parseNum(d?.fluctuationsRatio);
+                return { price: p, chgPct: fr != null ? fr / 100 : null, nm: d?.stockName || null };
+              }
+            } catch (e) {}
+          }
+          // 2순위: 네이버 폴링 API
+          for (const pi of order) {
+            try {
+              const u = `https://polling.finance.naver.com/api/realtime/domestic/stock/${code}`;
+              const r = await fetchTO(PROXIES[pi](u), 6000);
+              if (!r.ok) continue;
+              const d = await r.json();
+              const it = d?.datas?.[0];
+              const p = parseNum(it?.closePrice);
+              if (p > 0) {
+                krRouteRef.current[code] = pi;
+                const fr = parseNum(it?.fluctuationsRatio);
+                return { price: p, chgPct: fr != null ? fr / 100 : null, nm: null };
+              }
+            } catch (e) {}
+          }
+          // 3순위: Yahoo (폴백)
+          for (const suf of [".KS", ".KQ"]) {
             for (const pi of order) {
               try {
+                const y = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suf}?range=1d&interval=1m&_=${Date.now()}`;
                 const r = await fetchTO(PROXIES[pi](y), 6000);
                 if (!r.ok) continue;
                 const d = await r.json();
                 const meta = d?.chart?.result?.[0]?.meta;
                 if (meta?.regularMarketPrice > 0) {
-                  krRouteRef.current[code] = { suf, px: pi };
-                  return { price: meta.regularMarketPrice, chgPct: meta.chartPreviousClose ? (meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose : null };
+                  return { price: meta.regularMarketPrice, chgPct: meta.chartPreviousClose ? (meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose : null, nm: null };
                 }
               } catch (e) {}
             }
@@ -390,11 +424,17 @@ function InvestDashboard() {
         };
         const rs = await Promise.allSettled(kr.map((h) => fetchKr(h.code)));
         let krFail = 0;
+        const nameFix = {};
         rs.forEach((r, i) => {
-          if (r.status === "fulfilled" && r.value) next[kr[i].symbol] = { ...r.value, krw: true };
-          else krFail++;
+          if (r.status === "fulfilled" && r.value) {
+            next[kr[i].code] = { price: r.value.price, chgPct: r.value.chgPct, krw: true };
+            if (r.value.nm && (kr[i].name || "").startsWith("KRX ")) nameFix[kr[i].id] = r.value.nm;
+          } else krFail++;
         });
-        if (krFail === kr.length && kr.length > 0 && !next[kr[0].symbol]) setErr("국내 시세 프록시 응답 없음 — 잠시 후 자동 재시도 (수동 현재가로 표시 중)");
+        if (Object.keys(nameFix).length) {
+          setHoldings((hs) => hs.map((h) => (nameFix[h.id] ? { ...h, name: nameFix[h.id], symbol: nameFix[h.id].slice(0, 12) } : h)));
+        }
+        if (krFail === kr.length && kr.length > 0 && !next[kr[0].code]) setErr("국내 시세 프록시 응답 없음 — 잠시 후 자동 재시도 (수동 현재가로 표시 중)");
       }
       setPrices(next); setLastUpdate(new Date());
     } catch (e) { setErr("시세 조회 오류 — 네트워크를 확인하세요"); }
@@ -648,7 +688,7 @@ function InvestDashboard() {
     let totV = 0, totC = 0, stockV = 0, cryptoV = 0, dayChg = 0;
     const rows = holdings.map((h) => {
       if (h.type === "manual") {
-        const q = prices[h.symbol];
+        const q = h.code ? prices[h.code] : null;
         const live = q?.krw && q.price > 0;
         const p = live ? q.price : (h.pk || 0);
         const v = p * h.qty;
@@ -1346,7 +1386,7 @@ function InvestDashboard() {
               </div>
             </div>
             <button style={{ ...S.btn, width: "100%" }} onClick={addKr}>국내 종목 등록</button>
-            <div style={{ fontSize: 10, color: "#A6AEBB", marginTop: 6 }}>코드는 토스·네이버증권 종목 페이지에서 확인 · 시세는 15~20분 지연 가능</div>
+            <div style={{ fontSize: 10, color: "#A6AEBB", marginTop: 6 }}>코드는 토스·네이버증권 종목 페이지 확인 · 시세는 네이버증권 기준(실시간급) · 이름 미입력 시 자동 조회</div>
           </div>
         )}
 
