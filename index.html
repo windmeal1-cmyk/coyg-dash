@@ -277,6 +277,11 @@ function InvestDashboard() {
   const [sBusy, setSBusy] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [advOpen, setAdvOpen] = useState(false);
+  const [krOpen, setKrOpen] = useState(false);
+  const [kCode, setKCode] = useState("");
+  const [kName, setKName] = useState("");
+  const [kAvg, setKAvg] = useState("");
+  const [kQty, setKQty] = useState("");
   const [showAllH, setShowAllH] = useState(false);
   const [editId, setEditId] = useState(null);
   const [logoData, setLogoData] = useState("");
@@ -347,6 +352,27 @@ function InvestDashboard() {
         if (results.every((r) => r.status === "rejected")) setErr("주식 시세 실패 — API 키를 확인하세요");
       } else if (st.length && !apiKey) {
         setErr("주식 시세는 설정 탭에서 Finnhub API 키 등록 후 표시됩니다 (코인은 연동됨)");
+      }
+      // 국내(KRX) 종목: 코드 있으면 자동 시세 (Yahoo, .KS→.KQ 순 시도)
+      const kr = holdings.filter((h) => h.type === "manual" && h.code);
+      if (kr.length) {
+        const fetchKr = async (code) => {
+          for (const suf of [".KS", ".KQ"]) {
+            try {
+              const y = `https://query1.finance.yahoo.com/v8/finance/chart/${code}${suf}?range=1d&interval=1d`;
+              const r = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(y)}`);
+              if (!r.ok) continue;
+              const d = await r.json();
+              const meta = d?.chart?.result?.[0]?.meta;
+              if (meta?.regularMarketPrice) {
+                return { price: meta.regularMarketPrice, chgPct: meta.chartPreviousClose ? (meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose : null };
+              }
+            } catch (e) {}
+          }
+          return null;
+        };
+        const rs = await Promise.allSettled(kr.map((h) => fetchKr(h.code)));
+        rs.forEach((r, i) => { if (r.status === "fulfilled" && r.value) next[kr[i].symbol] = { ...r.value, krw: true }; });
       }
       setPrices(next); setLastUpdate(new Date());
     } catch (e) { setErr("시세 조회 오류 — 네트워크를 확인하세요"); }
@@ -600,12 +626,14 @@ function InvestDashboard() {
     let totV = 0, totC = 0, stockV = 0, cryptoV = 0, dayChg = 0;
     const rows = holdings.map((h) => {
       if (h.type === "manual") {
-        const p = h.pk || 0;
+        const q = prices[h.symbol];
+        const live = q?.krw && q.price > 0;
+        const p = live ? q.price : (h.pk || 0);
         const v = p * h.qty;
         const c = (h.avg || 0) * h.qty;
         totV += v; totC += c;
         stockV += v;
-        return { ...h, price: p, chgPct: null, value: v, cost: c, pl: v - c, plPct: c > 0 ? (v - c) / c : null };
+        return { ...h, price: p, chgPct: live ? q.chgPct : null, live, value: v, cost: c, pl: v - c, plPct: c > 0 ? (v - c) / c : null };
       }
       const q = prices[h.symbol];
       const p = q?.price || 0;
@@ -811,7 +839,8 @@ function InvestDashboard() {
                 </div>
                 <div style={{ fontSize: 11.5, color: "#8B95A1", fontVariantNumeric: "tabular-nums" }}>
                   {r.type === "manual"
-                    ? (r.qty > 0 ? `${r.qty}주 · 평단 ${fmtKRW(r.avg)} · 현재 ${fmtKRW(r.price)} (수동)` : "미보유 · 국내(수동시세)")
+                    ? <React.Fragment>{r.qty > 0 ? `${r.qty}주 · 평단 ${fmtKRW(r.avg)} · ${fmtKRW(r.price)}${r.live ? "" : " (수동)"}` : "미보유 · 국내"}
+                        {r.chgPct != null && <span style={{ color: upDown(r.chgPct), marginLeft: 4, fontWeight: 700 }}>{fmtPct(r.chgPct)}</span>}</React.Fragment>
                     : <React.Fragment>{r.qty > 0 ? `${r.qty}주 · 평단 ${fmtUSD(r.avg)}` : "미보유"} {r.price > 0 && `· ${fmtUSD(r.price)}`}
                       {r.chgPct != null && <span style={{ color: upDown(r.chgPct), marginLeft: 4, fontWeight: 700 }}>{fmtPct(r.chgPct)}</span>}</React.Fragment>}
                 </div>
@@ -1153,6 +1182,17 @@ function InvestDashboard() {
   const onAmt = (v) => { setSAmt(v); const a = +sAvg; if (a > 0 && +v > 0) setSQty(String(Math.round((+v / fx / a) * 100) / 100)); };
   const onQty = (v) => { setSQty(v); const a = +sAvg; if (a > 0 && +v > 0) setSAmt(String(Math.round(+v * a * fx))); };
   const onAvg = (v) => { setSAvg(v); const a = +v; if (a > 0 && +sAmt > 0) setSQty(String(Math.round((+sAmt / fx / a) * 100) / 100)); };
+  const addKr = () => {
+    const code = kCode.trim().replace(/[^0-9]/g, "");
+    if (code.length !== 6) { setErr("종목코드 6자리를 입력하세요 (토스·네이버증권에서 확인)"); return; }
+    if (!(+kQty > 0) || !(+kAvg > 0)) { setErr("평단(₩)과 수량을 입력하세요"); return; }
+    const sym = (kName.trim() || code).slice(0, 12);
+    if (holdings.some((h) => h.code === code)) { setErr("이미 등록된 코드입니다"); return; }
+    setHoldings((hs) => [...hs, { id: code + "_" + Date.now(), type: "manual", symbol: sym, name: kName.trim() || `KRX ${code}`, code, sector: sSec, w: 0, qty: +kQty, avg: +kAvg, pk: 0 }]);
+    showToast(`${sym} 등록 — 시세 자동 연동`);
+    setKCode(""); setKName(""); setKAvg(""); setKQty(""); setKrOpen(false);
+    setTimeout(() => refreshPrices(), 400);
+  };
   const addOwned = () => {
     if (!sSel || !(+sQty > 0) || !(+sAvg > 0)) { setErr("평단과 수량(또는 투입금액)을 입력하세요"); return; }
     const sym = sSel.symbol;
@@ -1251,6 +1291,43 @@ function InvestDashboard() {
           </div>
         )}
 
+        {/* 국내 종목 추가 */}
+        <div onClick={() => setKrOpen(!krOpen)} style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "9px 12px", background: "#F8F9FB", borderRadius: 10, border: "1px solid #EEF0F4" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700 }}>🇰🇷 국내 주식·ETF 추가 <span style={{ color: "#98A1AD", fontWeight: 400, fontSize: 11 }}>코드로 시세 자동 연동</span></span>
+          <span style={{ color: "#EF0107", fontSize: 12 }}>{krOpen ? "▲" : "▼"}</span>
+        </div>
+        {krOpen && (
+          <div style={{ marginTop: 8, padding: 12, background: "#FDF7F7", border: "1px solid #F5DADA", borderRadius: 12 }} className="fadein">
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div style={{ width: 90 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>종목코드</div>
+                <input style={S.input} value={kCode} onChange={(e) => setKCode(e.target.value)} placeholder="458730" inputMode="numeric" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>이름 (표시용)</div>
+                <input style={S.input} value={kName} onChange={(e) => setKName(e.target.value)} placeholder="TIGER 미국우주항공" />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8 }}>
+              {Object.entries(SECTORS).filter(([k]) => k !== "crypto").map(([k, s]) => (
+                <button key={k} style={S.chip(sSec === k)} onClick={() => setSSec(k)}>{s.name}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>평단 (₩)</div>
+                <input style={S.input} type="number" value={kAvg} onChange={(e) => setKAvg(e.target.value)} placeholder="11287" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>수량</div>
+                <input style={S.input} type="number" value={kQty} onChange={(e) => setKQty(e.target.value)} placeholder="383" />
+              </div>
+            </div>
+            <button style={{ ...S.btn, width: "100%" }} onClick={addKr}>국내 종목 등록</button>
+            <div style={{ fontSize: 10, color: "#A6AEBB", marginTop: 6 }}>코드는 토스·네이버증권 종목 페이지에서 확인 · 시세는 15~20분 지연 가능</div>
+          </div>
+        )}
+
         {sSel && (
           <div style={{ marginTop: 10, padding: 12, background: "#FDF7F7", border: "1px solid #F5DADA", borderRadius: 12 }} className="fadein">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -1310,13 +1387,14 @@ function InvestDashboard() {
               <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "8px 0", background: "#FAFBFC", borderRadius: 8, paddingLeft: 8, paddingRight: 8, marginBottom: 6 }} className="fadein">
                 <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={r.qty || ""} placeholder="수량" onChange={(e) => setH(r.id, "qty", +e.target.value || 0)} />
                 <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={r.avg || ""} placeholder={r.type === "manual" ? "평단₩" : "평단$"} onChange={(e) => setH(r.id, "avg", +e.target.value || 0)} />
-                {r.type === "manual" && <input style={{ ...S.input, width: 78 }} type="number" step="any" value={r.pk || ""} placeholder="현재가₩" onChange={(e) => setH(r.id, "pk", +e.target.value || 0)} />}
+                {r.type === "manual" && <input style={{ ...S.input, width: 66 }} value={r.code || ""} placeholder="코드" onChange={(e) => setH(r.id, "code", e.target.value.replace(/[^0-9]/g, "").slice(0, 6))} />}
+                {r.type === "manual" && !r.live && <input style={{ ...S.input, width: 70 }} type="number" step="any" value={r.pk || ""} placeholder="현재가₩" onChange={(e) => setH(r.id, "pk", +e.target.value || 0)} />}
                 <button style={{ ...S.plus, borderColor: "#E8EBEF", color: "#F04452" }} onClick={() => { delH(r.id); setEditId(null); }}>×</button>
               </div>
             )}
           </div>
         ))}
-        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>행을 탭하면 수정·삭제 · 국내(수동) 종목은 현재가₩ 직접 갱신</div>
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>행 탭=수정·삭제 · 국내 종목은 코드 6자리 입력 시 시세 자동, 없으면 현재가₩ 수동</div>
       </div>
 
       {/* 플랜 기본 종목 (접이식) */}
