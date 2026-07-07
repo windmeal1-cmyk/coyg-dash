@@ -276,6 +276,7 @@ function InvestDashboard() {
   const [sAmt, setSAmt] = useState("");
   const [sBusy, setSBusy] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [advOpen, setAdvOpen] = useState(false);
   const [showAllH, setShowAllH] = useState(false);
   const [editId, setEditId] = useState(null);
   const [logoData, setLogoData] = useState("");
@@ -679,7 +680,6 @@ function InvestDashboard() {
   );
 
   const Home = () => {
-    const donutSegs = Object.entries(SECTORS).map(([k, s]) => ({ label: s.name, v: calc.secAgg[k], color: s.color }));
     return (
       <div className="fadein">
         {/* 히어로 */}
@@ -771,22 +771,6 @@ function InvestDashboard() {
           </div>
         )}
 
-        {/* 배분 도넛 */}
-        <div style={S.card}>
-          <div style={{ ...S.label, marginBottom: 8 }}>자산 배분</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <Donut segments={donutSegs} />
-            <div style={{ flex: 1 }}>
-              {donutSegs.map((s) => (
-                <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "3px 0", fontSize: 12 }}>
-                  <span><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 3, background: s.color, marginRight: 7 }} />{s.label}</span>
-                  <span style={{ fontVariantNumeric: "tabular-nums", color: "#6B7684", fontWeight: 600 }}>{calc.totV > 0 ? fmtPct(s.v / calc.totV, false) : "—"}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
         {/* 섹터 목표 vs 실제 */}
         <div style={S.card}>
           <div style={{ ...S.label, marginBottom: 10 }}>주식 섹터 — 목표 vs 실제</div>
@@ -853,57 +837,6 @@ function InvestDashboard() {
   /* ═══════════ 탐색 ═══════════ */
   const Explore = () => (
     <div className="fadein">
-      {/* 종목 검색 */}
-      <div style={S.card}>
-        <div style={{ ...S.label, marginBottom: 8 }}>종목 검색 (미국 전체)</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input style={{ ...S.input, flex: 1 }} value={searchQ} onChange={(e) => setSearchQ(e.target.value)}
-            placeholder="티커·기업명 (예: TSLA, palantir)" onKeyDown={(e) => e.key === "Enter" && runSearch()} />
-          <button style={S.btn} onClick={runSearch} disabled={searching}>{searching ? "…" : "검색"}</button>
-        </div>
-        {searchRes.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 6 }}>
-              {Object.entries(SECTORS).filter(([k]) => k !== "crypto").map(([k, s]) => (
-                <button key={k} style={S.chip(searchSec === k)} onClick={() => setSearchSec(k)}>{s.name}</button>
-              ))}
-            </div>
-            {searchRes.map((x) => (
-              <div key={x.symbol} style={{ ...S.row, gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 700, fontSize: 13 }}>{x.symbol}</span>
-                  <span style={{ color: "#8B95A1", fontSize: 11, marginLeft: 6 }}>{x.description}</span>
-                </div>
-                <button style={S.plus} onClick={() => addHolding(searchSec, x.symbol, x.description || x.symbol)}>+</button>
-              </div>
-            ))}
-            <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 4 }}>섹터 칩을 고른 뒤 [+]를 누르면 해당 섹터로 추가됩니다</div>
-          </div>
-        )}
-      </div>
-
-      {/* 내 종목 시세 */}
-      <div style={S.card}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <div style={S.label}>내 종목 시세</div>
-          <button style={S.ghost} onClick={refreshPrices} disabled={loading}>{loading ? "…" : "↻"}</button>
-        </div>
-        {calc.rows.map((r) => (
-          <div key={r.id} style={{ ...S.row, cursor: "pointer" }} onClick={() => r.type === "stock" && goNews(r.symbol)}>
-            <div>
-              <span style={{ fontWeight: 700 }}>{r.symbol}</span>
-              <span style={{ color: "#8B95A1", fontSize: 11.5, marginLeft: 6 }}>{SECTORS[r.sector].name}</span>
-            </div>
-            <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-              <span style={{ fontWeight: 700 }}>{r.price > 0 ? fmtUSD(r.price) : "—"}</span>
-              <span style={{ color: upDown(r.chgPct || 0), marginLeft: 8, fontSize: 12.5, fontWeight: 700, display: "inline-block", minWidth: 52 }}>
-                {r.chgPct != null ? fmtPct(r.chgPct) : ""}
-              </span>
-            </div>
-          </div>
-        ))}
-      </div>
-
       {/* 섹터별 후보 풀 */}
       <div style={S.card}>
         <div style={{ ...S.label, marginBottom: 8 }}>섹터별 후보 종목 풀</div>
@@ -1408,32 +1341,32 @@ function InvestDashboard() {
         )}
       </div>
 
+      {/* 고급 (접이식): AI 인식 · 백업 */}
       <div style={S.card}>
-        <div style={{ ...S.label, marginBottom: 8 }}>스크린샷 AI 인식 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>β</span></div>
-        <div style={{ fontSize: 11.5, color: "#8B95A1", marginBottom: 8, lineHeight: 1.55 }}>
-          증권앱 보유종목 캡처를 올리면 종목·수량·평단을 자동 추출해 추가합니다. 국내(KRX) 종목은 원화 수동시세로 등록됩니다.
+        <div onClick={() => setAdvOpen(!advOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+          <div style={S.label}>고급 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>스크린샷 AI 인식 · 백업/복원</span></div>
+          <span style={{ color: "#EF0107", fontSize: 12 }}>{advOpen ? "▲" : "▼"}</span>
         </div>
-        <input style={{ ...S.input, marginBottom: 8 }} value={aiKey} onChange={(e) => setAiKey(e.target.value.trim())} placeholder="Anthropic API 키 (console.anthropic.com · 장당 몇 원)" />
-        <label style={{ ...S.btn, display: "inline-block", opacity: importing ? 0.6 : 1 }}>
-          {importing ? "인식 중…" : "📷 스크린샷 선택"}
-          <input type="file" accept="image/*" style={{ display: "none" }} disabled={importing}
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) aiImport(f); e.target.value = ""; }} />
-        </label>
-        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8, lineHeight: 1.5 }}>
-          이미지는 Anthropic API로 전송됩니다. 무료 대안: 스크린샷을 Claude 채팅에 올려 백업 텍스트를 받아 아래 복원 칸에 붙여넣기.
-        </div>
-      </div>
-
-      <div style={S.card}>
-        <div style={{ ...S.label, marginBottom: 8 }}>데이터 백업 · 복원</div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-          <button style={S.ghost} onClick={doBackup}>백업 텍스트 생성</button>
-          <button style={S.ghost} onClick={doRestore}>붙여넣은 텍스트로 복원</button>
-          <button style={{ ...S.ghost, color: "#F04452" }} onClick={doReset}>초기화</button>
-        </div>
-        <textarea style={{ ...S.input, height: 74, fontSize: 10.5, fontFamily: "monospace" }} value={backup} onChange={(e) => setBackup(e.target.value)}
-          placeholder="백업: 버튼을 누르면 여기 생성 → 복사해 보관 / 복원: 텍스트 붙여넣고 복원 버튼" />
-        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 6 }}>기기 변경·데이터 삭제 대비 가끔 백업해 두세요</div>
+        {advOpen && (
+          <div style={{ marginTop: 10 }} className="fadein">
+            <div style={{ fontSize: 11.5, color: "#8B95A1", marginBottom: 8, lineHeight: 1.55 }}>
+              📷 증권앱 캡처를 올리면 종목·수량·평단을 자동 추출합니다 (국내 종목은 원화 수동시세 등록).
+            </div>
+            <input style={{ ...S.input, marginBottom: 8 }} value={aiKey} onChange={(e) => setAiKey(e.target.value.trim())} placeholder="Anthropic API 키 (장당 몇 원 · 무료 대안: Claude 채팅)" />
+            <label style={{ ...S.btn, display: "inline-block", opacity: importing ? 0.6 : 1, marginBottom: 14 }}>
+              {importing ? "인식 중…" : "📷 스크린샷 선택"}
+              <input type="file" accept="image/*" style={{ display: "none" }} disabled={importing}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) aiImport(f); e.target.value = ""; }} />
+            </label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <button style={S.ghost} onClick={doBackup}>백업 생성</button>
+              <button style={S.ghost} onClick={doRestore}>복원</button>
+              <button style={{ ...S.ghost, color: "#F04452" }} onClick={doReset}>초기화</button>
+            </div>
+            <textarea style={{ ...S.input, height: 70, fontSize: 10.5, fontFamily: "monospace" }} value={backup} onChange={(e) => setBackup(e.target.value)}
+              placeholder="백업: 버튼 → 생성된 텍스트 복사 보관 / 복원: 붙여넣고 복원" />
+          </div>
+        )}
       </div>
 
       <div style={{ margin: "14px 16px 22px", fontSize: 10.5, color: "#A6AEBB", lineHeight: 1.65 }}>
@@ -1443,11 +1376,11 @@ function InvestDashboard() {
   );
 
   const TABS = [
-    { id: "home", label: "현황", icon: "M3 12l9-9 9 9M5 10v10h14V10", view: <Home /> },
-    { id: "explore", label: "탐색", icon: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35", view: <Explore /> },
-    { id: "news", label: "뉴스", icon: "M4 5h16v14H4zM8 9h8M8 13h8M8 17h5", view: <News /> },
-    { id: "plan", label: "적립", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", view: <Plan /> },
-    { id: "set", label: "설정", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 11-14 0 7 7 0 0114 0z", view: <Settings /> },
+    { id: "home", label: "현황", icon: "M3 12l9-9 9 9M5 10v10h14V10", render: Home },
+    { id: "explore", label: "탐색", icon: "M11 19a8 8 0 100-16 8 8 0 000 16zM21 21l-4.35-4.35", render: Explore },
+    { id: "news", label: "뉴스", icon: "M4 5h16v14H4zM8 9h8M8 13h8M8 17h5", render: News },
+    { id: "plan", label: "적립", icon: "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", render: Plan },
+    { id: "set", label: "설정", icon: "M12 15a3 3 0 100-6 3 3 0 000 6zM19 12a7 7 0 11-14 0 7 7 0 0114 0z", render: Settings },
   ];
 
   return (
@@ -1481,7 +1414,7 @@ function InvestDashboard() {
         </div>
       )}
 
-      {TABS.find((t) => t.id === tab)?.view}
+      {TABS.find((t) => t.id === tab)?.render()}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 86, left: "50%", transform: "translateX(-50%)", background: "rgba(25,31,40,.92)", color: "#FFF", borderRadius: 22, padding: "9px 18px", fontSize: 12.5, fontWeight: 600, zIndex: 40, whiteSpace: "nowrap" }}>
