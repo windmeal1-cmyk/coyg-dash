@@ -19,8 +19,8 @@
   html,body{margin:0;padding:0;background:#F7F7F9;-webkit-tap-highlight-color:transparent}
   input,textarea{-webkit-appearance:none}
   *{box-sizing:border-box}
-  #bg{position:fixed;inset:0;z-index:0;background:#F7F7F9 url('bg.jpg') center 18%/cover no-repeat}
-  #bg::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(247,247,249,.86) 0%,rgba(247,247,249,.93) 45%,rgba(247,247,249,.97) 100%)}
+  #bg{position:fixed;inset:0;z-index:0;background:#F7F7F9;background-size:cover;background-position:center 18%;background-repeat:no-repeat}
+  #bgov{position:fixed;inset:0;z-index:0;background:linear-gradient(180deg,#F7F7F9 0%,#F7F7F9 100%);opacity:.9;pointer-events:none}
   #root{position:relative;z-index:1}
   .fadein{animation:fi .22s ease}
   @keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
@@ -29,7 +29,22 @@
 </head>
 <body>
 <div id="bg"></div>
+<div id="bgov"></div>
 <div id="root"></div>
+<script>
+// 배경 사진: 여러 파일명 자동 탐색 (bg.jpg / bg.jpeg / bg.png / 대문자 확장자)
+(function () {
+  var cands = ["bg.jpg", "bg.jpeg", "bg.png", "bg.JPG", "bg.JPEG", "bg.PNG"];
+  var el = document.getElementById("bg");
+  (function tryNext(i) {
+    if (i >= cands.length) return;
+    var img = new Image();
+    img.onload = function () { el.style.backgroundImage = "url('" + cands[i] + "')"; };
+    img.onerror = function () { tryNext(i + 1); };
+    img.src = cands[i] + "?v=2";
+  })(0);
+})();
+</script>
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef, useCallback, useMemo } = React;
 
@@ -122,6 +137,14 @@ const POOL = {
     { s: "AVGO", n: "Broadcom", note: "AI 맞춤형 반도체" },
     { s: "TSM", n: "TSMC (ADR)", note: "파운드리" },
   ],
+};
+const KR_ALIAS = {
+  "써클": "CRCL", "엔비디아": "NVDA", "애플": "AAPL", "마이크로소프트": "MSFT", "테슬라": "TSLA",
+  "구글": "GOOGL", "알파벳": "GOOGL", "아마존": "AMZN", "메타": "META", "브로드컴": "AVGO",
+  "팔란티어": "PLTR", "보잉": "BA", "록히드": "LMT", "록히드마틴": "LMT", "코카콜라": "KO",
+  "펩시": "PEP", "버라이즌": "VZ", "셰브론": "CVX", "암젠": "AMGN", "길리어드": "GILD",
+  "버텍스": "VRTX", "리제네론": "REGN", "이튼": "ETN", "콴타": "PWR", "티에스엠씨": "TSM", "TSMC": "TSM",
+  "AMD": "AMD", "인텔": "INTC", "넷플릭스": "NFLX", "코인베이스": "COIN", "마이크로스트래티지": "MSTR",
 };
 const STORE_KEY = "invest-dash-v1";
 const storageGet = (k) => { try { const v = localStorage.getItem(k); return v ? { value: v } : null; } catch (e) { return null; } };
@@ -240,6 +263,25 @@ function InvestDashboard() {
   const [searching, setSearching] = useState(false);
   const [fxLoading, setFxLoading] = useState(false);
   const [backup, setBackup] = useState("");
+  const [aiKey, setAiKey] = useState("");
+  const [scan, setScan] = useState({ d: "", res: [] });
+  const [scanning, setScanning] = useState(false);
+  const [scanProg, setScanProg] = useState(0);
+  const [sQ, setSQ] = useState("");
+  const [sRes, setSRes] = useState([]);
+  const [sSel, setSSel] = useState(null); // {symbol, name}
+  const [sSec, setSSec] = useState("tech");
+  const [sAvg, setSAvg] = useState("");
+  const [sQty, setSQty] = useState("");
+  const [sAmt, setSAmt] = useState("");
+  const [sBusy, setSBusy] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  const [showAllH, setShowAllH] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [logoData, setLogoData] = useState("");
+  const [bgData, setBgData] = useState("");
+  const [bgDim, setBgDim] = useState(0.9);
+  const [importing, setImporting] = useState(false);
   const [err, setErr] = useState("");
   const [toast, setToast] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -262,6 +304,8 @@ function InvestDashboard() {
         if (d.tasks) setTasks(d.tasks);
         if (d.taskMonth) setTaskMonth(d.taskMonth);
         if (d.history) setHistory(d.history);
+        if (d.aiKey) setAiKey(d.aiKey);
+        if (d.scan) setScan(d.scan);
       }
     } catch (e) {}
     setLoaded(true);
@@ -270,9 +314,9 @@ function InvestDashboard() {
     if (!loaded) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      storageSet(STORE_KEY, JSON.stringify({ holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history }));
+      storageSet(STORE_KEY, JSON.stringify({ holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history, aiKey, scan }));
     }, 500);
-  }, [holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history, loaded]);
+  }, [holdings, apiKey, fx, monthly, stockRatio, tasks, taskMonth, history, aiKey, scan, loaded]);
 
   /* ── 시세 ── */
   const refreshPrices = useCallback(async () => {
@@ -339,6 +383,14 @@ function InvestDashboard() {
     return () => { clearInterval(pi); clearInterval(ni); };
   }, [loaded, apiKey, holdings.length]); // eslint-disable-line
 
+  /* ── 환율 자동: 시작 시 + 30분마다 ── */
+  useEffect(() => {
+    if (!loaded) return;
+    loadFx(true);
+    const fi = setInterval(() => loadFx(true), 1800000);
+    return () => clearInterval(fi);
+  }, [loaded]); // eslint-disable-line
+
   /* ── 탐색 ── */
   const loadSectorQuotes = useCallback(async (sec) => {
     if (!apiKey) { setErr("후보 시세는 API 키가 필요합니다 (설정 탭)"); return; }
@@ -384,17 +436,112 @@ function InvestDashboard() {
     setSearching(false);
   }, [apiKey, searchQ]);
 
-  const loadFx = useCallback(async () => {
-    setFxLoading(true);
+  const loadFx = useCallback(async (silent) => {
+    if (!silent) setFxLoading(true);
     try {
       const r = await fetch("https://open.er-api.com/v6/latest/USD");
       if (r.ok) {
         const d = await r.json();
-        if (d?.rates?.KRW) { setFx(Math.round(d.rates.KRW * 10) / 10); showToast(`환율 갱신: ${Math.round(d.rates.KRW * 10) / 10}원`); }
-      } else setErr("환율 조회 실패 — 수동 입력하세요");
-    } catch (e) { setErr("환율 조회 실패 — 수동 입력하세요"); }
+        if (d?.rates?.KRW) {
+          const v = Math.round(d.rates.KRW * 10) / 10;
+          setFx(v);
+          if (!silent) showToast(`환율 갱신: ${v}원`);
+        }
+      } else if (!silent) setErr("환율 조회 실패 — 수동 입력하세요");
+    } catch (e) { if (!silent) setErr("환율 조회 실패 — 수동 입력하세요"); }
     setFxLoading(false);
   }, []);
+
+
+  /* ── 오늘의 관심 시그널 스캔 (하루 1회) ──
+     점수 = 낙폭40 + 컨센서스30 + 리밸런싱20 + 역추세10 (매수 추천 아님) */
+  const runScan = useCallback(async () => {
+    if (!apiKey) { setErr("시그널 스캔은 API 키가 필요합니다 (설정 탭)"); return; }
+    if (scanning) return;
+    setScanning(true); setScanProg(2);
+    try {
+      const map = {};
+      holdings.filter((h) => h.type === "stock").forEach((h) => { map[h.symbol] = { name: h.name, sector: h.sector }; });
+      Object.entries(POOL).forEach(([sec, list]) => list.forEach((p) => { if (!map[p.s]) map[p.s] = { name: p.n, sector: sec }; }));
+      const syms = Object.keys(map);
+      const raw = {};
+      const CH = 12;
+      for (let i = 0; i < syms.length; i += CH) {
+        const part = syms.slice(i, i + CH);
+        const rs = await Promise.allSettled(part.map(async (s) => {
+          const [q, m] = await Promise.all([
+            fetch(`https://finnhub.io/api/v1/quote?symbol=${s}&token=${apiKey}`).then((r) => (r.ok ? r.json() : null)),
+            fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${s}&metric=all&token=${apiKey}`).then((r) => (r.ok ? r.json() : null)),
+          ]);
+          return { s, q, m };
+        }));
+        rs.forEach((r) => {
+          if (r.status === "fulfilled" && r.value.q?.c > 0) {
+            raw[r.value.s] = { c: r.value.q.c, pc: r.value.q.pc, high: r.value.m?.metric?.["52WeekHigh"] || null };
+          }
+        });
+        setScanProg(Math.round(((i + part.length) / syms.length) * 70));
+        if (i + CH < syms.length) await new Promise((r) => setTimeout(r, 26000));
+      }
+      // 섹터 미달 (리밸런싱 가점)
+      let stockV = 0; const secV = {};
+      holdings.forEach((h) => {
+        if (h.type === "crypto") return;
+        const v = h.type === "manual" ? (h.pk || 0) * h.qty : (prices[h.symbol]?.price || 0) * h.qty * fx;
+        stockV += v; secV[h.sector] = (secV[h.sector] || 0) + v;
+      });
+      const deficit = {};
+      Object.entries(SECTORS).forEach(([k, s]) => {
+        if (k === "crypto" || !stockV) return;
+        deficit[k] = Math.max(0, s.target - (secV[k] || 0) / stockV);
+      });
+      // 예비 점수 (낙폭40 + 리밸20 + 역추세10)
+      const pre = Object.entries(raw).map(([s, d]) => {
+        const dd = d.high ? Math.max(0, 1 - d.c / d.high) : 0;
+        const chg = d.pc ? (d.c - d.pc) / d.pc : 0;
+        const ddS = Math.min(dd / 0.30, 1) * 40;
+        const rebS = Math.min((deficit[map[s].sector] || 0) / 0.05, 1) * 20;
+        const momS = chg < 0 ? Math.min(-chg / 0.03, 1) * 10 : 0;
+        return { s, name: map[s].name, sector: map[s].sector, price: d.c, chg, dd, ddS, rebS, momS, pre: ddS + rebS + momS };
+      }).sort((a, b) => b.pre - a.pre);
+      // 상위 10개만 컨센서스 조회 (30점)
+      const top = pre.slice(0, 10);
+      setScanProg(82);
+      const recs = await Promise.allSettled(
+        top.map((t) => fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${t.s}&token=${apiKey}`).then((r) => (r.ok ? r.json() : [])))
+      );
+      recs.forEach((r, i) => {
+        let consS = 15, consPct = null; // ETF 등 컨센서스 없음 → 중립 15점
+        if (r.status === "fulfilled" && Array.isArray(r.value) && r.value[0]) {
+          const v = r.value[0];
+          const tot = (v.strongBuy || 0) + (v.buy || 0) + (v.hold || 0) + (v.sell || 0) + (v.strongSell || 0);
+          if (tot > 0) {
+            consPct = ((v.strongBuy || 0) + (v.buy || 0)) / tot;
+            consS = (((v.strongBuy || 0) * 1 + (v.buy || 0) * 0.7) / tot) * 30;
+          }
+        }
+        top[i].consS = consS; top[i].consPct = consPct;
+        top[i].score = Math.round(top[i].pre + consS);
+      });
+      top.sort((a, b) => b.score - a.score);
+      setScan({
+        d: todayStr(),
+        res: top.slice(0, 3).map((t) => ({ s: t.s, name: t.name, sector: t.sector, price: t.price, chg: t.chg, dd: t.dd, consPct: t.consPct, reb: t.rebS > 4, score: t.score })),
+      });
+      setScanProg(100);
+      showToast("오늘의 시그널 스캔 완료");
+    } catch (e) { setErr("스캔 실패 — 잠시 후 다시 시도하세요"); }
+    setScanning(false);
+  }, [apiKey, holdings, prices, fx, scanning]);
+
+  /* 하루 1회 자동 스캔 (첫 시세 로드 후) */
+  useEffect(() => {
+    if (!loaded || !apiKey || scanning) return;
+    if (scan.d !== todayStr()) {
+      const t = setTimeout(() => runScan(), 4000);
+      return () => clearTimeout(t);
+    }
+  }, [loaded, apiKey, scan.d]); // eslint-disable-line
 
   /* ── 뉴스 ── */
   const loadNews = useCallback(async (filter) => {
@@ -436,6 +583,14 @@ function InvestDashboard() {
   const calc = useMemo(() => {
     let totV = 0, totC = 0, stockV = 0, cryptoV = 0, dayChg = 0;
     const rows = holdings.map((h) => {
+      if (h.type === "manual") {
+        const p = h.pk || 0;
+        const v = p * h.qty;
+        const c = (h.avg || 0) * h.qty;
+        totV += v; totC += c;
+        stockV += v;
+        return { ...h, price: p, chgPct: null, value: v, cost: c, pl: v - c, plPct: c > 0 ? (v - c) / c : null };
+      }
       const q = prices[h.symbol];
       const p = q?.price || 0;
       const v = p * h.qty * fx;
@@ -532,7 +687,7 @@ function InvestDashboard() {
           </div>
           <div style={{ marginTop: 11, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span style={{ fontSize: 11, color: "rgba(255,255,255,.75)" }}>
-              {lastUpdate ? `${lastUpdate.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 업데이트 · $1=${fx.toLocaleString()}원 · 60초 자동` : "시세 미조회"}
+              {lastUpdate ? `${lastUpdate.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 업데이트 · $1=${fx.toLocaleString()}원(실시간) · 60초 자동` : "시세 미조회"}
             </span>
             <button style={{ ...S.ghost, background: "rgba(255,255,255,.22)", color: "#FFF", border: "none" }} onClick={refreshPrices} disabled={loading}>{loading ? "…" : "↻"}</button>
           </div>
@@ -542,6 +697,51 @@ function InvestDashboard() {
         {calc.bandAlerts.length > 0 && (
           <div style={{ margin: "0 12px", padding: "10px 13px", background: "#FFF7ED", border: "1px solid #FED7AA", borderRadius: 12, fontSize: 12.5, color: "#C2410C" }}>
             ⚠ <b>{calc.bandAlerts.join(", ")}</b> 비중이 목표 ±5%p를 벗어났어요 — 이번 달 적립으로 조정을 권장합니다
+          </div>
+        )}
+
+
+        {/* 오늘의 관심 시그널 */}
+        {apiKey && (
+          <div style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div style={S.label}>오늘의 관심 시그널 <span style={{ textTransform: "none", letterSpacing: 0, color: "#A6AEBB" }}>{scan.d && `· ${scan.d}`}</span></div>
+              <button style={S.ghost} onClick={runScan} disabled={scanning}>{scanning ? `${scanProg}%` : "↻ 스캔"}</button>
+            </div>
+            {scanning && (
+              <div style={{ height: 4, background: "#F1F3F6", borderRadius: 2, margin: "6px 0 10px" }}>
+                <div style={{ width: `${scanProg}%`, height: "100%", background: "#EF0107", borderRadius: 2, transition: "width .5s" }} />
+              </div>
+            )}
+            {!scanning && scan.res.length === 0 && (
+              <div style={{ fontSize: 12.5, color: "#98A1AD", padding: "4px 0" }}>스캔을 실행하면 보유+후보 46종을 규칙 기반으로 점수화해 상위 3종을 보여줍니다 (약 1~2분 소요)</div>
+            )}
+            {scan.res.map((t, i) => (
+              <div key={t.s} style={{ ...S.row, cursor: "pointer" }} onClick={() => goNews(t.s)}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
+                  <div style={{ width: 34, height: 34, borderRadius: 10, background: i === 0 ? "#EF0107" : "#FDECEC", color: i === 0 ? "#FFF" : "#C70008", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>
+                    {t.score}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                      {t.s} <span style={{ fontWeight: 400, color: "#8B95A1", fontSize: 11 }}>{t.name}</span>
+                    </div>
+                    <div style={{ fontSize: 10.5, color: "#98A1AD", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      고점比 -{Math.round(t.dd * 100)}%{t.consPct != null && ` · 매수의견 ${Math.round(t.consPct * 100)}%`}{t.reb && " · 섹터미달"}{t.chg < 0 && ` · 오늘 ${fmtPct(t.chg)}`}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", flexShrink: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>{fmtUSD(t.price)}</div>
+                  <div style={{ fontSize: 11, color: upDown(t.chg), fontWeight: 700 }}>{fmtPct(t.chg)}</div>
+                </div>
+              </div>
+            ))}
+            {scan.res.length > 0 && (
+              <div style={{ fontSize: 10, color: "#A6AEBB", marginTop: 7, lineHeight: 1.5 }}>
+                규칙 기반 시그널(낙폭40·컨센서스30·리밸런싱20·역추세10)이며 매수 추천이 아닙니다 · 하루 1회 자동 스캔
+              </div>
+            )}
           </div>
         )}
 
@@ -597,16 +797,24 @@ function InvestDashboard() {
 
         {/* 보유 종목 */}
         <div style={S.card}>
-          <div style={{ ...S.label, marginBottom: 4 }}>보유 종목</div>
-          {calc.rows.map((r) => (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <div style={S.label}>보유 종목</div>
+            <button style={{ ...S.ghost, padding: "4px 10px", fontSize: 11 }} onClick={() => setShowAllH(!showAllH)}>{showAllH ? "보유만" : "플랜 전체"}</button>
+          </div>
+          {calc.rows.filter((r) => showAllH || r.qty > 0).length === 0 && (
+            <div style={{ fontSize: 12.5, color: "#98A1AD", padding: "6px 0" }}>설정 탭에서 종목을 검색해 등록하세요</div>
+          )}
+          {calc.rows.filter((r) => showAllH || r.qty > 0).map((r) => (
             <div key={r.id} style={{ ...S.row, cursor: "pointer" }} onClick={() => r.type === "stock" && goNews(r.symbol)}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700, fontSize: 14 }}>
                   {r.symbol} <span style={{ fontWeight: 400, color: "#8B95A1", fontSize: 11.5 }}>{r.name}</span>
                 </div>
                 <div style={{ fontSize: 11.5, color: "#8B95A1", fontVariantNumeric: "tabular-nums" }}>
-                  {r.qty > 0 ? `${r.qty}주 · 평단 ${fmtUSD(r.avg)}` : "미보유"} {r.price > 0 && `· ${fmtUSD(r.price)}`}
-                  {r.chgPct != null && <span style={{ color: upDown(r.chgPct), marginLeft: 4, fontWeight: 700 }}>{fmtPct(r.chgPct)}</span>}
+                  {r.type === "manual"
+                    ? (r.qty > 0 ? `${r.qty}주 · 평단 ${fmtKRW(r.avg)} · 현재 ${fmtKRW(r.price)} (수동)` : "미보유 · 국내(수동시세)")
+                    : <React.Fragment>{r.qty > 0 ? `${r.qty}주 · 평단 ${fmtUSD(r.avg)}` : "미보유"} {r.price > 0 && `· ${fmtUSD(r.price)}`}
+                      {r.chgPct != null && <span style={{ color: upDown(r.chgPct), marginLeft: 4, fontWeight: 700 }}>{fmtPct(r.chgPct)}</span>}</React.Fragment>}
                 </div>
                 {newsLines[r.symbol] && (
                   <div onClick={(e) => { e.stopPropagation(); window.open(newsLines[r.symbol].url, "_blank"); }}
@@ -866,6 +1074,163 @@ function InvestDashboard() {
   };
 
   /* ═══════════ 설정 ═══════════ */
+
+  /* ── 스크린샷 AI 인식 ── */
+  const guessSector = (name, symbol) => {
+    for (const [sec, list] of Object.entries(POOL)) if (list.some((p) => p.s === symbol)) return sec;
+    const n = (name || "").toLowerCase();
+    if (/우주|방산|항공|defense|aero/.test(n)) return "aero";
+    if (/배당|dividend|리츠|reit/.test(n)) return "div";
+    if (/바이오|제약|bio|pharm|health/.test(n)) return "bio";
+    if (/인프라|전력|철도|infra|util/.test(n)) return "infra";
+    return "tech";
+  };
+  const aiImport = async (file) => {
+    if (!aiKey) { setErr("AI 인식은 Anthropic API 키가 필요합니다 (아래 입력) — 무료로 하려면 스크린샷을 Claude 채팅에 올려 백업 텍스트를 받아 복원하세요"); return; }
+    setImporting(true); setErr("");
+    try {
+      const b64 = await new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload = () => res(r.result.split(",")[1]);
+        r.onerror = () => rej(new Error("read fail"));
+        r.readAsDataURL(file);
+      });
+      const mt = file.type === "image/png" ? "image/png" : "image/jpeg";
+      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": aiKey,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          max_tokens: 1500,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: mt, data: b64 } },
+              { type: "text", text: "이 증권앱 스크린샷에서 보유 종목을 추출해 JSON 배열만 출력해. 다른 텍스트·마크다운 금지. 스키마: [{\"name\":종목명, \"symbol\":미국티커(모르면 null), \"market\":\"US\"|\"KR\", \"qty\":수량, \"avgPrice\":평단(숫자), \"currency\":\"USD\"|\"KRW\", \"currentPrice\":현재가(없으면 null)}]. 한국 상장 종목(원화 표시·KRX ETF 등)은 market KR. 미국 종목의 한글명은 티커로 변환(예: 써클 인터넷 그룹→CRCL, 엔비디아→NVDA)." }
+            ]
+          }]
+        })
+      });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error.message || "API 오류");
+      const text = (data.content || []).filter((c) => c.type === "text").map((c) => c.text).join("");
+      const items = JSON.parse(text.replace(/```json|```/g, "").trim());
+      let added = 0, skipped = 0;
+      setHoldings((hs) => {
+        let next = [...hs];
+        items.forEach((it) => {
+          const sym = (it.symbol || it.name || "").toUpperCase().slice(0, 12);
+          if (!it.qty || next.some((h) => h.symbol === sym)) { skipped++; return; }
+          if (it.market === "KR" || (!it.symbol && it.currency === "KRW")) {
+            next.push({ id: sym + "_" + Date.now(), type: "manual", symbol: sym, name: it.name || sym, sector: guessSector(it.name, sym), w: 0, qty: it.qty, avg: it.avgPrice || 0, pk: it.currentPrice || 0 });
+          } else {
+            const avgUsd = it.currency === "KRW" ? Math.round(((it.avgPrice || 0) / fx) * 100) / 100 : (it.avgPrice || 0);
+            next.push({ id: sym, type: "stock", symbol: sym, name: it.name || sym, sector: guessSector(it.name, sym), w: 0, qty: it.qty, avg: avgUsd });
+          }
+          added++;
+        });
+        return next;
+      });
+      showToast(`${added}개 종목 추가${skipped ? ` · ${skipped}개 중복/제외` : ""} — 섹터·비중 확인하세요`);
+    } catch (e) {
+      setErr("인식 실패: " + (e.message || "이미지를 다시 확인하세요"));
+    }
+    setImporting(false);
+  };
+
+
+
+  /* ── 앱 꾸미기: 이미지 업로드 (기기 저장, 자동 압축) ── */
+  const compressImage = (file, maxDim, mime, q) => new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      URL.revokeObjectURL(url);
+      res(cv.toDataURL(mime, q));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("이미지 읽기 실패")); };
+    img.src = url;
+  });
+  const setImage = async (kind, file) => {
+    try {
+      const data = kind === "logo"
+        ? await compressImage(file, 512, "image/png")
+        : await compressImage(file, 1280, "image/jpeg", 0.82);
+      try { localStorage.setItem(kind === "logo" ? "coyg-logo" : "coyg-bg", data); }
+      catch (e) { setErr("이미지 용량 초과 — 더 작은 사진을 선택하세요"); return; }
+      if (kind === "logo") setLogoData(data); else setBgData(data);
+      showToast(kind === "logo" ? "로고 적용됨" : "배경 적용됨");
+    } catch (e) { setErr("이미지 처리 실패 — 다른 사진으로 시도하세요"); }
+  };
+  const clearImage = (kind) => {
+    try { localStorage.removeItem(kind === "logo" ? "coyg-logo" : "coyg-bg"); } catch (e) {}
+    if (kind === "logo") setLogoData(""); else setBgData("");
+    showToast("제거됨 — repo의 파일이 있으면 그걸로 대체됩니다");
+  };
+  useEffect(() => { // 저장된 이미지·밝기 로드
+    try {
+      const l = localStorage.getItem("coyg-logo"); if (l) setLogoData(l);
+      const b = localStorage.getItem("coyg-bg"); if (b) setBgData(b);
+      const d = localStorage.getItem("coyg-bgdim"); if (d) setBgDim(+d);
+    } catch (e) {}
+  }, []);
+  useEffect(() => { // 배경 적용 (#bg는 React 밖 엘리먼트)
+    const el = document.getElementById("bg");
+    if (el && bgData) el.style.backgroundImage = `url('${bgData}')`;
+    const ov = document.getElementById("bgov");
+    if (ov) ov.style.opacity = String(bgDim);
+    try { localStorage.setItem("coyg-bgdim", String(bgDim)); } catch (e) {}
+  }, [bgData, bgDim]);
+
+  /* ── 개별종목 검색·추가 ── */
+  const settingsSearch = async () => {
+    if (!apiKey) { setErr("종목 검색은 API 키가 필요합니다"); return; }
+    let q = sQ.trim();
+    if (!q) return;
+    const alias = KR_ALIAS[q] || KR_ALIAS[q.replace(/\s/g, "")];
+    if (alias) q = alias;
+    setSBusy(true); setSSel(null);
+    try {
+      const r = await fetch(`https://finnhub.io/api/v1/search?q=${encodeURIComponent(q)}&token=${apiKey}`);
+      if (r.ok) {
+        const d = await r.json();
+        const list = (d.result || []).filter((x) => !x.symbol.includes(".") && !x.symbol.includes(":")).slice(0, 5);
+        setSRes(list);
+        if (list.length === 0) setErr("검색 결과 없음 — 영문 티커로 시도해 보세요 (국내 종목은 미지원)");
+      }
+    } catch (e) { setErr("검색 실패"); }
+    setSBusy(false);
+  };
+  const pickResult = (x) => {
+    setSSel({ symbol: x.symbol, name: x.description || x.symbol });
+    setSSec(guessSector(x.description, x.symbol));
+    setSAvg(""); setSQty(""); setSAmt("");
+  };
+  const onAmt = (v) => { setSAmt(v); const a = +sAvg; if (a > 0 && +v > 0) setSQty(String(Math.round((+v / fx / a) * 100) / 100)); };
+  const onQty = (v) => { setSQty(v); const a = +sAvg; if (a > 0 && +v > 0) setSAmt(String(Math.round(+v * a * fx))); };
+  const onAvg = (v) => { setSAvg(v); const a = +v; if (a > 0 && +sAmt > 0) setSQty(String(Math.round((+sAmt / fx / a) * 100) / 100)); };
+  const addOwned = () => {
+    if (!sSel || !(+sQty > 0) || !(+sAvg > 0)) { setErr("평단과 수량(또는 투입금액)을 입력하세요"); return; }
+    const sym = sSel.symbol;
+    setHoldings((hs) => {
+      const ex = hs.find((h) => h.symbol === sym);
+      if (ex) return hs.map((h) => (h.symbol === sym ? { ...h, qty: +sQty, avg: +sAvg } : h));
+      return [...hs, { id: sym, type: "stock", symbol: sym, name: sSel.name, sector: sSec, w: 0, qty: +sQty, avg: +sAvg }];
+    });
+    showToast(`${sym} ${sQty}주 등록 완료`);
+    setSSel(null); setSRes([]); setSQ("");
+  };
+
   const doBackup = () => {
     const r = storageGet(STORE_KEY);
     setBackup(r?.value || "");
@@ -891,25 +1256,171 @@ function InvestDashboard() {
         <div style={{ ...S.label, marginBottom: 8 }}>API · 환율</div>
         <div style={{ fontSize: 11, color: "#8B95A1", marginBottom: 3 }}>Finnhub API 키 (finnhub.io 무료 가입 → API Key 복사)</div>
         <input style={S.input} value={apiKey} onChange={(e) => setApiKey(e.target.value.trim())} placeholder="예: c1a2b3..." />
-        <div style={{ fontSize: 11, color: "#8B95A1", margin: "11px 0 3px" }}>USD/KRW 환율</div>
+        <div style={{ fontSize: 11, color: "#8B95A1", margin: "11px 0 3px" }}>USD/KRW 환율 <span style={{ color: "#A6AEBB" }}>— 실시간 자동(30분), 수동 수정 가능</span></div>
         <div style={{ display: "flex", gap: 8 }}>
           <input style={{ ...S.input, flex: 1 }} type="number" value={fx} onChange={(e) => setFx(+e.target.value || 0)} />
-          <button style={S.ghost} onClick={loadFx} disabled={fxLoading}>{fxLoading ? "…" : "자동 조회"}</button>
+          <button style={S.ghost} onClick={() => loadFx()} disabled={fxLoading}>{fxLoading ? "…" : "지금 조회"}</button>
         </div>
       </div>
 
+
+      {/* 앱 꾸미기 */}
       <div style={S.card}>
-        <div style={{ ...S.label, marginBottom: 8 }}>보유 종목 관리 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>(수량 · 평단$ · 섹터 내 비중%)</span></div>
-        {holdings.map((h) => (
-          <div key={h.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "6.5px 0", borderBottom: "1px solid #F3F5F8" }}>
-            <div style={{ width: 58, fontWeight: 700, fontSize: 12 }}>{h.symbol}<div style={{ fontWeight: 400, fontSize: 9, color: "#A6AEBB" }}>{SECTORS[h.sector].name}</div></div>
-            <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.qty || ""} placeholder="수량" onChange={(e) => setH(h.id, "qty", +e.target.value || 0)} />
-            <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.avg || ""} placeholder="평단$" onChange={(e) => setH(h.id, "avg", +e.target.value || 0)} />
-            <input style={{ ...S.input, width: 52 }} type="number" step="5" value={Math.round(h.w * 100) || ""} placeholder="비중" onChange={(e) => setH(h.id, "w", (+e.target.value || 0) / 100)} />
-            <button style={{ ...S.plus, borderColor: "#E8EBEF", color: "#F04452" }} onClick={() => delH(h.id)}>×</button>
+        <div style={{ ...S.label, marginBottom: 8 }}>앱 꾸미기 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>사진첩에서 바로 적용 · 기기 저장</span></div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: "#F5F6F8", border: "1px solid #E8EBEF", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", flexShrink: 0 }}>
+            {logoData ? <img src={logoData} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 10, color: "#A6AEBB" }}>로고</span>}
+          </div>
+          <label style={{ ...S.ghost, display: "inline-block" }}>
+            로고 선택
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) setImage("logo", f); e.target.value = ""; }} />
+          </label>
+          {logoData && <button style={{ ...S.ghost, color: "#F04452" }} onClick={() => clearImage("logo")}>제거</button>}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: "#F5F6F8", border: "1px solid #E8EBEF", overflow: "hidden", flexShrink: 0 }}>
+            {bgData ? <img src={bgData} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 10, color: "#A6AEBB", display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>배경</span>}
+          </div>
+          <label style={{ ...S.ghost, display: "inline-block" }}>
+            배경 사진 선택
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) setImage("bg", f); e.target.value = ""; }} />
+          </label>
+          {bgData && <button style={{ ...S.ghost, color: "#F04452" }} onClick={() => clearImage("bg")}>제거</button>}
+        </div>
+        <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 3 }}>배경 밝기 (왼쪽=사진 진하게 · 오른쪽=화이트 깔끔)</div>
+        <input type="range" min="0.55" max="0.98" step="0.01" value={bgDim} onChange={(e) => setBgDim(+e.target.value)} style={{ width: "100%", accentColor: "#EF0107" }} />
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8, lineHeight: 1.5 }}>
+          이미지는 자동 압축(로고 512px·배경 1280px)되어 이 기기에만 저장됩니다 · 백업 텍스트에는 미포함 · 홈 화면 앱 아이콘은 repo의 logo.png 또는 단축어 방식 사용
+        </div>
+      </div>
+
+      {/* 개별종목 — 검색해서 등록 */}
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>개별종목 등록 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>검색 → 선택 → 단가·금액 입력</span></div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input style={{ ...S.input, flex: 1 }} value={sQ} onChange={(e) => setSQ(e.target.value)}
+            placeholder="티커·이름 (써클, NVDA, 팔란티어…)" onKeyDown={(e) => e.key === "Enter" && settingsSearch()} />
+          <button style={S.btn} onClick={settingsSearch} disabled={sBusy}>{sBusy ? "…" : "검색"}</button>
+        </div>
+
+        {sRes.length > 0 && !sSel && (
+          <div style={{ marginTop: 6 }} className="fadein">
+            {sRes.map((x) => (
+              <div key={x.symbol} style={{ ...S.row, cursor: "pointer" }} onClick={() => pickResult(x)}>
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontWeight: 700, fontSize: 13.5 }}>{x.symbol}</span>
+                  <span style={{ color: "#8B95A1", fontSize: 11.5, marginLeft: 7 }}>{x.description}</span>
+                </div>
+                <span style={{ color: "#EF0107", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>선택 ›</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {sSel && (
+          <div style={{ marginTop: 10, padding: 12, background: "#FDF7F7", border: "1px solid #F5DADA", borderRadius: 12 }} className="fadein">
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div>
+                <span style={{ fontWeight: 800, fontSize: 15 }}>{sSel.symbol}</span>
+                <span style={{ color: "#8B95A1", fontSize: 11.5, marginLeft: 7 }}>{sSel.name}</span>
+              </div>
+              <button style={{ ...S.ghost, padding: "4px 9px" }} onClick={() => setSSel(null)}>✕</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, overflowX: "auto", paddingBottom: 8 }}>
+              {Object.entries(SECTORS).filter(([k]) => k !== "crypto").map(([k, s]) => (
+                <button key={k} style={S.chip(sSec === k)} onClick={() => setSSec(k)}>{s.name}</button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>평단 ($)</div>
+                <input style={S.input} type="number" step="any" value={sAvg} onChange={(e) => onAvg(e.target.value)} placeholder="80.9" />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>투입금액 (₩)</div>
+                <input style={S.input} type="number" step="any" value={sAmt} onChange={(e) => onAmt(e.target.value)} placeholder="1000000" />
+              </div>
+              <div style={{ width: 80 }}>
+                <div style={{ fontSize: 10.5, color: "#8B95A1", marginBottom: 2 }}>수량 (자동)</div>
+                <input style={S.input} type="number" step="any" value={sQty} onChange={(e) => onQty(e.target.value)} placeholder="0" />
+              </div>
+            </div>
+            <button style={{ ...S.btn, width: "100%" }} onClick={addOwned}>이 종목 등록</button>
+          </div>
+        )}
+      </div>
+
+      {/* 내 개별종목 테이블 */}
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 4 }}>내 개별종목</div>
+        {calc.rows.filter((r) => r.qty > 0).length === 0 && (
+          <div style={{ fontSize: 12.5, color: "#98A1AD", padding: "6px 0" }}>위에서 검색해 종목을 등록하세요</div>
+        )}
+        {calc.rows.filter((r) => r.qty > 0).map((r) => (
+          <div key={r.id}>
+            <div style={{ ...S.row, cursor: "pointer" }} onClick={() => setEditId(editId === r.id ? null : r.id)}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                  {r.symbol} <span style={{ fontWeight: 400, color: "#8B95A1", fontSize: 11 }}>{r.type === "manual" ? "국내·수동" : r.type === "crypto" ? "코인" : SECTORS[r.sector].name}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#8B95A1", fontVariantNumeric: "tabular-nums" }}>
+                  {r.qty}주 · 평단 {r.type === "manual" ? fmtKRW(r.avg) : fmtUSD(r.avg)}
+                </div>
+              </div>
+              <div style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{r.value > 0 ? fmtKRW(r.value) : "—"}</div>
+                {r.plPct != null && <div style={{ fontSize: 11.5, color: upDown(r.pl), fontWeight: 700 }}>{fmtPct(r.plPct)}</div>}
+              </div>
+            </div>
+            {editId === r.id && (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "8px 0", background: "#FAFBFC", borderRadius: 8, paddingLeft: 8, paddingRight: 8, marginBottom: 6 }} className="fadein">
+                <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={r.qty || ""} placeholder="수량" onChange={(e) => setH(r.id, "qty", +e.target.value || 0)} />
+                <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={r.avg || ""} placeholder={r.type === "manual" ? "평단₩" : "평단$"} onChange={(e) => setH(r.id, "avg", +e.target.value || 0)} />
+                {r.type === "manual" && <input style={{ ...S.input, width: 78 }} type="number" step="any" value={r.pk || ""} placeholder="현재가₩" onChange={(e) => setH(r.id, "pk", +e.target.value || 0)} />}
+                <button style={{ ...S.plus, borderColor: "#E8EBEF", color: "#F04452" }} onClick={() => { delH(r.id); setEditId(null); }}>×</button>
+              </div>
+            )}
           </div>
         ))}
-        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>비중=섹터 내 %(합 100 권장) · 코인 수량은 개수 · 이 기기에 저장</div>
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8 }}>행을 탭하면 수정·삭제 · 국내(수동) 종목은 현재가₩ 직접 갱신</div>
+      </div>
+
+      {/* 플랜 기본 종목 (접이식) */}
+      <div style={S.card}>
+        <div onClick={() => setPlanOpen(!planOpen)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+          <div style={S.label}>플랜 종목 · 섹터 내 비중 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>(적립 계산용)</span></div>
+          <span style={{ color: "#EF0107", fontSize: 12 }}>{planOpen ? "▲" : "▼"}</span>
+        </div>
+        {planOpen && (
+          <div style={{ marginTop: 6 }} className="fadein">
+            {holdings.filter((h) => h.type !== "manual").map((h) => (
+              <div key={h.id} style={{ display: "flex", gap: 6, alignItems: "center", padding: "6px 0", borderBottom: "1px solid #F3F5F8" }}>
+                <div style={{ width: 62, fontWeight: 700, fontSize: 12 }}>{h.symbol}<div style={{ fontWeight: 400, fontSize: 9, color: "#A6AEBB" }}>{SECTORS[h.sector].name}</div></div>
+                <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.qty || ""} placeholder="수량" onChange={(e) => setH(h.id, "qty", +e.target.value || 0)} />
+                <input style={{ ...S.input, flex: 1 }} type="number" step="any" value={h.avg || ""} placeholder="평단$" onChange={(e) => setH(h.id, "avg", +e.target.value || 0)} />
+                <input style={{ ...S.input, width: 52 }} type="number" step="5" value={Math.round(h.w * 100) || ""} placeholder="비중" onChange={(e) => setH(h.id, "w", (+e.target.value || 0) / 100)} />
+                <button style={{ ...S.plus, borderColor: "#E8EBEF", color: "#F04452" }} onClick={() => delH(h.id)}>×</button>
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 6 }}>비중=섹터 내 %(합 100 권장) — 적립 탭 매수금액 계산에 사용 · 코인 수량은 개수</div>
+          </div>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ ...S.label, marginBottom: 8 }}>스크린샷 AI 인식 <span style={{ color: "#A6AEBB", textTransform: "none", letterSpacing: 0 }}>β</span></div>
+        <div style={{ fontSize: 11.5, color: "#8B95A1", marginBottom: 8, lineHeight: 1.55 }}>
+          증권앱 보유종목 캡처를 올리면 종목·수량·평단을 자동 추출해 추가합니다. 국내(KRX) 종목은 원화 수동시세로 등록됩니다.
+        </div>
+        <input style={{ ...S.input, marginBottom: 8 }} value={aiKey} onChange={(e) => setAiKey(e.target.value.trim())} placeholder="Anthropic API 키 (console.anthropic.com · 장당 몇 원)" />
+        <label style={{ ...S.btn, display: "inline-block", opacity: importing ? 0.6 : 1 }}>
+          {importing ? "인식 중…" : "📷 스크린샷 선택"}
+          <input type="file" accept="image/*" style={{ display: "none" }} disabled={importing}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) aiImport(f); e.target.value = ""; }} />
+        </label>
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 8, lineHeight: 1.5 }}>
+          이미지는 Anthropic API로 전송됩니다. 무료 대안: 스크린샷을 Claude 채팅에 올려 백업 텍스트를 받아 아래 복원 칸에 붙여넣기.
+        </div>
       </div>
 
       <div style={S.card}>
@@ -920,12 +1431,12 @@ function InvestDashboard() {
           <button style={{ ...S.ghost, color: "#F04452" }} onClick={doReset}>초기화</button>
         </div>
         <textarea style={{ ...S.input, height: 74, fontSize: 10.5, fontFamily: "monospace" }} value={backup} onChange={(e) => setBackup(e.target.value)}
-          placeholder="백업: 버튼을 누르면 여기 생성 → 복사해 메모장 보관&#10;복원: 백업 텍스트를 붙여넣고 복원 버튼" />
-        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 6 }}>기기를 바꾸거나 브라우저 데이터를 지울 때를 대비해 가끔 백업해 두세요</div>
+          placeholder="백업: 버튼을 누르면 여기 생성 → 복사해 보관 / 복원: 텍스트 붙여넣고 복원 버튼" />
+        <div style={{ fontSize: 10.5, color: "#A6AEBB", marginTop: 6 }}>기기 변경·데이터 삭제 대비 가끔 백업해 두세요</div>
       </div>
 
       <div style={{ margin: "14px 16px 22px", fontSize: 10.5, color: "#A6AEBB", lineHeight: 1.65 }}>
-        시세: Finnhub(주식, 15분 내 지연 가능)·CoinGecko(코인)·open.er-api(환율) 무료 API 기준으로 정확성이 보장되지 않습니다. 본 앱과 후보 종목 풀은 정보 제공 목적이며 투자자문·매수 추천이 아닙니다. 투자 판단과 책임은 본인에게 있습니다.
+        시세: Finnhub(주식, 15분 내 지연 가능)·CoinGecko(코인)·open.er-api(환율) 무료 API 기준으로 정확성이 보장되지 않습니다. 본 앱과 시그널·후보 풀은 정보 제공 목적이며 투자자문·매수 추천이 아닙니다. 투자 판단과 책임은 본인에게 있습니다.
       </div>
     </div>
   );
@@ -942,7 +1453,14 @@ function InvestDashboard() {
     <div style={S.app}>
       <div style={S.header}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <img src="logo.png" alt="" style={{ height: 34, width: 34, objectFit: "contain", filter: "drop-shadow(0 1px 3px rgba(0,0,0,.35))" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />
+          <img src={logoData || "logo.png"} alt="" style={{ height: 34, width: 34, objectFit: "contain", filter: "drop-shadow(0 1px 3px rgba(0,0,0,.35))" }}
+            onError={(e) => {
+              if (logoData) { e.currentTarget.style.display = "none"; return; }
+              const t = e.currentTarget;
+              const alts = ["logo.jpg", "logo.jpeg", "logo.PNG", "logo.JPG"];
+              const i = +(t.dataset.i || 0);
+              if (i < alts.length) { t.dataset.i = i + 1; t.src = alts[i]; } else t.style.display = "none";
+            }} />
           <div>
             <div style={{ fontWeight: 900, fontSize: 19, letterSpacing: 1.5, color: "#FFF", fontStyle: "italic" }}>
               COYG<span style={{ color: "rgba(255,255,255,.92)" }}>!</span>
